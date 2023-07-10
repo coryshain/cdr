@@ -558,8 +558,6 @@ class CDRModel(object):
     }
 
     N_QUANTILES = 41
-    PLOT_QUANTILE_RANGE = 0.9
-    PLOT_QUANTILE_IX = int((1 - PLOT_QUANTILE_RANGE) / 2 * N_QUANTILES)
     PREDICTIVE_DISTRIBUTIONS = Formula.PREDICTIVE_DISTRIBUTIONS.copy()
     for x in PREDICTIVE_DISTRIBUTIONS:
         PREDICTIVE_DISTRIBUTIONS[x]['dist'] = globals()[PREDICTIVE_DISTRIBUTIONS[x]['dist']]
@@ -819,8 +817,12 @@ class CDRModel(object):
                 cov_blocks.append(block.cov().values)
                 names += list(block.columns)
             corr = scipy.linalg.block_diag(*corr_blocks)
+            if corr.shape == (1, 0):
+                corr = np.zeros((0, 0))
             corr = pd.DataFrame(corr, index=names, columns=names)
             cov = scipy.linalg.block_diag(*cov_blocks)
+            if cov.shape == (1, 0):
+                cov = np.zeros((0, 0))
             cov = pd.DataFrame(cov, index=names, columns=names)
             means = pd.DataFrame([self.impulse_means[x] for x in cov.index], index=cov.index, columns=['val'])
             self.impulse_corr = corr
@@ -855,11 +857,17 @@ class CDRModel(object):
                     _last_obs = np.array(_last_obs, dtype=getattr(np, self.int_type))
                     _X_time = np.array(X[i].time, dtype=getattr(np, self.float_type))
                     X_time.append(_X_time)
+                    n_cells = len(_first_obs) * self.history_length
+                    step = max(1, np.round(n_cells / 1e8))
+                    if step > 1:
+                        stderr('\r      Dataset too large to compute exact temporal quantiles.' + 
+                               '\n      Approximating using %0.02f%% of data.\n' % (1./step * 100))
                     for j, (s, e) in enumerate(zip(_first_obs, _last_obs)):
-                        _X_time_slice = _X_time[s:e]
-                        t_delta = _Y_time[j] - _X_time_slice
-                        t_deltas.append(t_delta)
-                        t_delta_maxes.append(_Y_time[j] - _X_time[s])
+                        if j % step == 0:
+                            _X_time_slice = _X_time[s:e]
+                            t_delta = _Y_time[j] - _X_time_slice
+                            t_deltas.append(t_delta)
+                            t_delta_maxes.append(_Y_time[j] - _X_time[s])
         X_time = np.concatenate(X_time, axis=0)
         assert np.all(np.isfinite(X_time)), 'Stimulus sequence contained non-finite timestamps'
         Y_time = np.concatenate(Y_time, axis=0)
@@ -1187,11 +1195,11 @@ class CDRModel(object):
         self.impulse_df_ix_unique = sorted(list(set(self.impulse_df_ix)))
         self.n_impulse_df = len(self.impulse_df_ix_unique)
         self.impulse_indices = []
-        if len(self.impulse_df_ix_unique):
-            max_df = max(self.impulse_df_ix_unique)
+        if self.impulse_df_ix_unique:
+            max_impulse_df_ix_unique = max(self.impulse_df_ix_unique)
         else:
-            max_df = 0
-        for i in range(max_df + 1):
+            max_impulse_df_ix_unique = 0
+        for i in range(max_impulse_df_ix_unique + 1):
             arange = np.arange(len(self.form.t.impulses(include_interactions=True)))
             ix = arange[np.where(self.impulse_df_ix == i)[0]]
             self.impulse_indices.append(ix)
@@ -1202,7 +1210,7 @@ class CDRModel(object):
             self.n_response_df = max(self.n_response_df, max(self.response_to_df_ix[_response]))
         self.n_response_df += 1
 
-        if self.impulse_sampler_means is None:
+        if self.impulse_sampler_means is None or not len(self.impulse_sampler_means):
             self.impulse_sampler = None
         else:
             self.impulse_sampler = scipy.stats.multivariate_normal(
@@ -1262,8 +1270,14 @@ class CDRModel(object):
         self.impulse_scale_arr_expanded = s
 
         q = self.impulse_quantiles
+<<<<<<< HEAD
         if len(self.impulse_names):
             q = np.stack([q[x] for x in self.impulse_names], axis=1)
+=======
+        q = [q[x] for x in self.impulse_names]
+        if len(q):
+            q = np.stack(q, axis=1)
+>>>>>>> 4d10fc5caa7abf3dbf5150d7b6401bae39c760be
         else:
             q = np.zeros((self.N_QUANTILES, 0))
         self.impulse_quantiles_arr = q
@@ -1688,11 +1702,11 @@ class CDRModel(object):
                         tf.convert_to_tensor([
                             self.X_batch_dim,
                             self.history_length + self.future_length,
-                            max(self.n_impulse, 1)
+                            self.n_impulse
                         ]),
                         dtype=self.FLOAT_TF
                     ),
-                    shape=[None, None, max(self.n_impulse, 1)],
+                    shape=[None, None, self.n_impulse],
                     name='X_time'
                 )
                 self.X_mask = tf.placeholder_with_default(
@@ -1700,11 +1714,11 @@ class CDRModel(object):
                         tf.convert_to_tensor([
                             self.X_batch_dim,
                             self.history_length + self.future_length,
-                            max(self.n_impulse, 1)
+                            self.n_impulse
                         ]),
                         dtype=self.FLOAT_TF
                     ),
-                    shape=[None, None, max(self.n_impulse, 1)],
+                    shape=[None, None, self.n_impulse],
                     name='X_mask'
                 )
 
@@ -2315,7 +2329,13 @@ class CDRModel(object):
                         if 'eval_resample' in x:
                             self.resample_ops.append(x['eval_resample'])
                     else:
-                        _coefficient_fixed_base = []
+                        if self.use_distributional_regression:
+                            nparam = self.get_response_nparam(response)
+                        else:
+                            nparam = 1
+                        ndim = self.get_response_ndim(response)
+                        ncoef = 0
+                        _coefficient_fixed_base = tf.zeros([ncoef, nparam, ndim])
                     self.coefficient_fixed_base[response] = _coefficient_fixed_base
 
                     # Random
@@ -4999,8 +5019,16 @@ class CDRModel(object):
                     for j, response_param_name in enumerate(response_param_names):
                         dim_names = self.expand_param_name(response, response_param_name)
                         for k, dim_name in enumerate(dim_names):
-                            self.predictive_distribution_delta[response][dim_name] = output_delta[:, 0, 0, j, k]
-                            self.predictive_distribution_delta_w_interactions[response][dim_name] = output_delta_w_interactions[:, 0, 0, j, k]
+                            if self.use_distributional_regression or j == 0:
+                                self.predictive_distribution_delta[response][dim_name] = output_delta[:, 0, 0, j, k]
+                                self.predictive_distribution_delta_w_interactions[response][dim_name] = output_delta_w_interactions[:, 0, 0, j, k]
+                            else:
+                                self.predictive_distribution_delta[response][dim_name] = tf.zeros_like(
+                                    output_delta[:, 0, 0, 0, k]
+                                )
+                                self.predictive_distribution_delta_w_interactions[response][dim_name] = tf.zeros_like(
+                                    output_delta_w_interactions[:, 0, 0, 0, k]
+                                )
 
                     response_dist, response_dist_src, response_params = self._initialize_predictive_distribution_inner(
                         response,
@@ -5503,6 +5531,9 @@ class CDRModel(object):
                 self.ema_map = {}
                 for v in self.ema_vars:
                     self.ema_map[self.ema.average_name(v)] = v
+                for v in tf.get_collection('batch_norm'):
+                    name = ':'.join(v.name.split(':')[:-1])
+                    self.ema_map[name] = v
                 self.ema_saver = tf.train.Saver(self.ema_map)
 
     def _initialize_convergence_checking(self):
@@ -8271,10 +8302,11 @@ class CDRModel(object):
                                 out['log_lik'][_response][i:i + B] = _out['log_lik'][_response]
 
                     # Convert predictions to category labels, if applicable
-                    for _response in out['preds']:
-                        if self.is_categorical(_response):
-                            mapper = np.vectorize(lambda x: self.response_ix_to_category[_response].get(x, x))
-                            out['preds'][_response] = mapper(out['preds'][_response])
+                    if return_preds:
+                        for _response in out['preds']:
+                            if self.is_categorical(_response):
+                                mapper = np.vectorize(lambda x: self.response_ix_to_category[_response].get(x, x))
+                                out['preds'][_response] = mapper(out['preds'][_response])
 
                     # Split into per-file predictions.
                     # Exclude the length of last file because it will be inferred.
@@ -8572,6 +8604,7 @@ class CDRModel(object):
             X_in_Y_names=None,
             n_samples=None,
             algorithm='MAP',
+            return_preds=None,
             sum_outputs_along_T=True,
             sum_outputs_along_K=True,
             dump=False,
@@ -8602,6 +8635,7 @@ class CDRModel(object):
         :param X_in_Y_names: ``list`` of ``str``; names of predictors contained in **Y** rather than **X** (must be present in all elements of **Y**). If ``None``, no such predictors.
         :param n_samples: ``int`` or ``None``; number of posterior samples to draw if Bayesian, ignored otherwise. If ``None``, use model defaults.
         :param algorithm: ``str``; algorithm to use for extracting predictions, one of [``MAP``, ``sampling``].
+        :param return_preds: ``bool``; whether to return predictions as well as likelihoods. If ``None``, defaults are chosen based on predictive distribution(s).
         :param sum_outputs_along_T: ``bool``; whether to sum IRF-weighted predictors along the time dimension. Must be ``True`` for valid convolution. Setting to ``False`` is useful for timestep-specific evaluation.
         :param sum_outputs_along_K: ``bool``; whether to sum IRF-weighted predictors along the predictor dimension. Must be ``True`` for valid convolution. Setting to ``False`` is useful for impulse-specific evaluation.
         :param dump: ``bool``; whether to save generated data and evaluations to disk.
@@ -8619,13 +8653,19 @@ class CDRModel(object):
         else:
             partition_str = ''
 
+        if return_preds is None:
+            return_preds = True
+            for response in self.response_names:
+                if self.get_response_dist_name(response) in ('sinharcsinh', 'johnsonsu'):
+                    return_preds = False  # These distributions currently must bootstrap the mode, which is slow, so turned off by default.
+
         cdr_out = self.predict(
             X,
             Y=Y,
             X_in_Y_names=X_in_Y_names,
             n_samples=n_samples,
             algorithm=algorithm,
-            return_preds=True,
+            return_preds=return_preds,
             return_loglik=True,
             sum_outputs_along_T=sum_outputs_along_T,
             sum_outputs_along_K=sum_outputs_along_K,
@@ -8634,16 +8674,18 @@ class CDRModel(object):
             verbose=verbose
         )
 
-        preds = cdr_out['preds']
+        if return_preds:
+            preds = cdr_out['preds']
         log_lik = cdr_out['log_lik']
 
         # Expand arrays to be B x T x K
-        for response in preds:
-            for ix in preds[response]:
-                arr = preds[response][ix]
-                while len(arr.shape) < 3:
-                    arr = arr[..., None]
-                preds[response][ix] = arr
+        if return_preds:
+            for response in preds:
+                for ix in preds[response]:
+                    arr = preds[response][ix]
+                    while len(arr.shape) < 3:
+                        arr = arr[..., None]
+                    preds[response][ix] = arr
         for response in log_lik:
             for ix in log_lik[response]:
                 arr = log_lik[response][ix]
@@ -8719,7 +8761,10 @@ class CDRModel(object):
                         else:
                             sel = np.ones(len(_y), dtype=bool)
                         index = _y.index[sel]
-                        _preds = preds[_response][ix][sel]
+                        if return_preds:
+                            _preds = preds[_response][ix][sel]
+                        else:
+                            _preds = None
                         _y = _y[sel]
 
                         if self.is_binary(_response):
@@ -8759,40 +8804,44 @@ class CDRModel(object):
                             metrics['true_variance'][_response][ix] = np.std(_y) ** 2
                             for t in range(T):
                                 for k in range(K):
-                                    __preds = _preds[:, t, k]
-                                    error = np.array(_y - __preds) ** 2
-                                    score = error.mean()
-                                    resid = np.sort(_y - __preds)
-                                    if self.error_distribution_theoretical_quantiles[_response] is None:
-                                        resid_theoretical_q = None
+                                    if return_preds:
+                                        __preds = _preds[:, t, k]
+                                        error = np.array(_y - __preds) ** 2
+                                        score = error.mean()
+                                        resid = np.sort(_y - __preds)
+                                        if self.error_distribution_theoretical_quantiles[_response] is None:
+                                            resid_theoretical_q = None
+                                        else:
+                                            resid_theoretical_q = self.error_theoretical_quantiles(len(resid), _response)
+                                            valid = np.isfinite(resid_theoretical_q)
+                                            resid = resid[valid]
+                                            resid_theoretical_q = resid_theoretical_q[valid]
+                                        D, p_value = self.error_ks_test(resid, _response)
+    
+                                        if metrics['mse'][_response][ix] is None:
+                                            metrics['mse'][_response][ix] = np.zeros((T, K))
+                                        metrics['mse'][_response][ix][t, k] = score
+                                        if metrics['rho'][_response][ix] is None:
+                                            metrics['rho'][_response][ix] = np.zeros((T, K))
+                                        metrics['rho'][_response][ix][t, k] = np.corrcoef(_y, __preds, rowvar=False)[0, 1]
+                                        if metrics['percent_variance_explained'][_response][ix] is None:
+                                            metrics['percent_variance_explained'][_response][ix] = np.zeros((T, K))
+                                        metrics['percent_variance_explained'][_response][ix][
+                                            t, k] = percent_variance_explained(
+                                            _y, __preds)
+                                        if metrics['ks_results'][_response][ix] is None:
+                                            metrics['ks_results'][_response][ix] = (np.zeros((T, K)), np.zeros((T, K)))
+                                        metrics['ks_results'][_response][ix][0][t, k] = D
+                                        metrics['ks_results'][_response][ix][1][t, k] = p_value
                                     else:
-                                        resid_theoretical_q = self.error_theoretical_quantiles(len(resid), _response)
-                                        valid = np.isfinite(resid_theoretical_q)
-                                        resid = resid[valid]
-                                        resid_theoretical_q = resid_theoretical_q[valid]
-                                    D, p_value = self.error_ks_test(resid, _response)
-
-                                    if metrics['mse'][_response][ix] is None:
-                                        metrics['mse'][_response][ix] = np.zeros((T, K))
-                                    metrics['mse'][_response][ix][t, k] = score
-                                    if metrics['rho'][_response][ix] is None:
-                                        metrics['rho'][_response][ix] = np.zeros((T, K))
-                                    metrics['rho'][_response][ix][t, k] = np.corrcoef(_y, __preds, rowvar=False)[0, 1]
-                                    if metrics['percent_variance_explained'][_response][ix] is None:
-                                        metrics['percent_variance_explained'][_response][ix] = np.zeros((T, K))
-                                    metrics['percent_variance_explained'][_response][ix][
-                                        t, k] = percent_variance_explained(
-                                        _y, __preds)
-                                    if metrics['ks_results'][_response][ix] is None:
-                                        metrics['ks_results'][_response][ix] = (np.zeros((T, K)), np.zeros((T, K)))
-                                    metrics['ks_results'][_response][ix][0][t, k] = D
-                                    metrics['ks_results'][_response][ix][1][t, k] = p_value
+                                        error = __preds = None
                     else:
                         err_col_name = error = __preds = _y = None
 
                     _ll = log_lik[_response][ix]
                     if sel is not None:
-                        __preds = pd.Series(__preds, index=index)
+                        if __preds is not None:
+                            __preds = pd.Series(__preds, index=index)
                         _ll = _ll[sel]
                         _ll = pd.Series(np.squeeze(_ll), index=index)
                         if err_col_name is not None and error is not None:
@@ -9209,6 +9258,7 @@ class CDRModel(object):
             pair_manipulations=False,
             include_interactions=False,
             reference_type=None,
+            plot_quantile_range=0.9,
             xaxis=None,
             xmin=None,
             xmax=None,
@@ -9257,6 +9307,7 @@ class CDRModel(object):
         :param pair_manipulations: ``bool``; Whether to apply the manipulations to the reference input. If ``False``, all manipulations are compared to the same reference. For example, when plotting by-subject IRFs by subject, each subject might have a difference base response. In this case, set **pair_manipulations** to ``True`` in order to match the random effects used to compute the reference response and the response of interest.
         :param include_interactions: ``bool``; Whether to include interaction terms in plotting the influence of a manipulation.
         :param reference_type: ``bool``; Type of reference to use. If ``0``, use a zero-valued reference. If ``'mean'``, use the training set mean for all variables. If ``None``, use the default reference vector specified in the model's configuration file.
+        :param plot_quantile_range: ``float``; Quantile range to use for plotting. E.g., 0.9 uses the interdecile range.
         :param xaxis: ``list``, ``numpy`` vector, or ``None``; Vector of values to use for the x-axis. If ``None``, inferred.
         :param xmin: ``float`` or ``None``; Minimum value for x-axis (if axis inferred). If ``None``, inferred.
         :param xmax: ``float`` or ``None``; Maximum value for x-axis (if axis inferred). If ``None``, inferred.
@@ -9275,6 +9326,8 @@ class CDRModel(object):
 
         if level is None:
             level = 95
+
+        plot_quantile_ix = int((1 - plot_quantile_range) / 2 * self.N_QUANTILES)
 
         if responses is None:
             if self.n_response == 1:
@@ -9461,7 +9514,7 @@ class CDRModel(object):
                 if ref_varies:
                     X_ref_mask[ix] = 0
                 if axis is None:
-                    qix = self.PLOT_QUANTILE_IX
+                    qix = plot_quantile_ix
                     lq = self.impulse_quantiles_arr[qix][ix]
                     uq = self.impulse_quantiles_arr[self.N_QUANTILES - qix - 1][ix]
                     select = np.isclose(uq - lq, 0)
@@ -10041,6 +10094,7 @@ class CDRModel(object):
             plot_n_time_units=None,
             plot_n_time_points=None,
             reference_type=None,
+            plot_quantile_range=0.9,
             plot_step=None,
             plot_step_default=None,
             generate_univariate_irf_plots=None,
@@ -10062,6 +10116,7 @@ class CDRModel(object):
             level=95,
             n_samples=None,
             prefix=None,
+            suffix='.png',
             use_legend=None,
             use_line_markers=False,
             transparent_background=False,
@@ -10098,6 +10153,7 @@ class CDRModel(object):
         :param plot_n_time_units: ``float`` or ``None``; resolution of plot axis (for 3D plots, uses sqrt of this number for each axis). If ``None``, use default setting.
         :param plot_support_start: ``float`` or ``None``; start time for IRF plots. If ``None``, use default setting.
         :param reference_type: ``bool``; whether to use the predictor means as baseline reference (otherwise use zero).
+        :param plot_quantile_range: ``float``; quantile range to use for plotting. E.g., 0.9 uses the interdecile range.
         :param plot_step: ``str`` or ``None``; size of step by predictor to take above reference in univariate IRF plots. Structured as space-delimited pairs ``NAME=FLOAT``. Any predictor without a specified step size will inherit from **plot_step_default**.
         :param plot_step_default: ``float``, ``str``, or ``None``; default size of step to take above reference in univariate IRF plots, if not specified in **plot_step**. Either a float or the string ``'sd'``, which indicates training sample standard deviation.
         :param generate_univariate_irf_plots: ``bool``; whether to plot univariate IRFs over time.
@@ -10119,6 +10175,7 @@ class CDRModel(object):
         :param level: ``float``; significance level for confidence/credible intervals, if supported.
         :param n_samples: ``int`` or ``None``; number of posterior samples to draw if Bayesian, ignored otherwise. If ``None``, use model defaults.
         :param prefix: ``str`` or ``None``; prefix appended to output filenames. If ``None``, no prefix added.
+        :param suffix: ``str``; file extension of plot outputs.
         :param use_legend: ``bool`` or ``None``; whether to include a legend in plots with multiple components. If ``None``, use default setting.
         :param use_line_markers: ``bool``; whether to add markers to lines in univariate IRF plots.
         :param transparent_background: ``bool``; whether to use a transparent background. If ``False``, uses a white background.
@@ -10334,7 +10391,7 @@ class CDRModel(object):
                             filename += '_' + ranef_level_names[g]
                         if mc:
                             filename += '_mc'
-                        filename += '.png'
+                        filename += suffix
 
                         _plot_y = plot_y[_response][_dim_name]
                         _lq = None if lq is None else lq[_response][_dim_name]
@@ -10378,7 +10435,7 @@ class CDRModel(object):
                                 names_cur,
                                 sort_names=sort_names,
                                 outdir=self.outdir,
-                                filename=filename[:-4] + '_hm.png',
+                                filename=filename[:-4] + '_hm' + suffix,
                                 irf_name_map=irf_name_map,
                                 plot_x_inches=plot_x_inches,
                                 plot_y_inches=plot_y_inches,
@@ -10416,6 +10473,7 @@ class CDRModel(object):
                     manipulations=manipulations,
                     pair_manipulations=True,
                     reference_type=reference_type,
+                    plot_quantile_range=plot_quantile_range,
                     xres=plot_n_time_points,
                     n_samples=n_samples,
                     level=level,
@@ -10457,7 +10515,7 @@ class CDRModel(object):
                                 filename += '_' + ranef_level_names[g]
                             if mc:
                                 filename += '_mc'
-                            filename += '.png'
+                            filename += suffix
 
                             plot_irf(
                                 plot_x,
@@ -10528,6 +10586,7 @@ class CDRModel(object):
                             manipulations=manipulations,
                             pair_manipulations=True,
                             reference_type=reference_type,
+                            plot_quantile_range=plot_quantile_range,
                             xmin=xmin,
                             xmax=xmax,
                             xres=int(np.ceil(np.sqrt(plot_n_time_points))),
@@ -10575,7 +10634,7 @@ class CDRModel(object):
                                         filename += '_' + ranef_level_names[g]
                                     if mc:
                                         filename += '_mc'
-                                    filename += '.png'
+                                    filename += suffix
 
                                     plot_surface(
                                         plot_x,
@@ -10612,7 +10671,7 @@ class CDRModel(object):
                     plot_x = self.session.run(self.support, feed_dict=fd)
                     plot_y = self.session.run(self.error_distribution_plot[_response], feed_dict=fd)
 
-                    plot_name = 'error_distribution_%s.png' % sn(_response)
+                    plot_name = 'error_distribution_%s%s' % (sn(_response), suffix)
 
                     lq = None
                     uq = None

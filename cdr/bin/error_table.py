@@ -80,7 +80,7 @@ def results_to_csv(results, systems, baselines=None, indent=4, base_partitions=N
         out.append(tuple(new_row(b, results, tasks, base_partitions=base_partitions)[:-3].split(' & ')))
     for s in systems:
         out.append(tuple(new_row(s, results, tasks, base_partitions=base_partitions)[:-3].split(' & ')))
- 
+
     out = pd.DataFrame(out, columns=cols)
 
     return out.to_csv(None, index=False)
@@ -92,14 +92,14 @@ if __name__ == '__main__':
     ''')
     argparser.add_argument('config_paths', nargs='+', help='Path(s) to config files defining models to compare.')
     argparser.add_argument('-r', '--response', default=None, help='Name of response to evaluate.')
-    argparser.add_argument('-m', '--metric', default='err', help='Metric to report. One of ``["err", "loglik", "iter"]``.')
+    argparser.add_argument('-m', '--metric', default='loglik', help='Metric to report. One of ``["err", "loglik", "pve", "iter"]``.')
     argparser.add_argument('-t', '--task_names', nargs='+', default=None, help='Task names to use (should be in 1-1 alignment with ``config_paths``). If not provided, names will be inferred from config paths.')
     argparser.add_argument('-b', '--baselines',  nargs='+', default=None, help='Models to treat as baselines.')
     argparser.add_argument('-B', '--baseline_names',  nargs='+', default=None, help='Names of baselines (should be in 1-1 alignment with ``baselines``. If not provided, names will be inferred from baselines.')
     argparser.add_argument('-s', '--systems',  nargs='+', default=None, help='Models to treat as (non-baseline) systems.')
     argparser.add_argument('-S', '--system_names',  nargs='+', default=None, help='Names of systems (should be in 1-1 alignment with ``systems``. If not provided, names will be inferred from systems.')
     argparser.add_argument('-p', '--partitions',  nargs='+', default=None, help='Names of partitions to evaluate. If not provided, defaults to ``"train"``, ``"dev"``, ``"test"``.')
-    argparser.add_argument('-a', '--agg', type=str, default='mean', help='Aggregation function to use over ensembles. E.g., ``"mean"``, ``"median"``, ``"min"``, ``"max"``.')
+    argparser.add_argument('-a', '--agg', type=str, default='median', help='Aggregation function to use over ensembles. E.g., ``"mean"``, ``"median"``, ``"min"``, ``"max"``.')
     argparser.add_argument('-c', '--csv', action='store_true', help='Output to CSV.')
     args = argparser.parse_args()
 
@@ -109,7 +109,7 @@ if __name__ == '__main__':
         metric = 'MSE'
     elif args.metric.lower() in ['loglik', 'll', 'likelihood']:
         metric = 'Loglik'
-    elif args.metric.lower() in ['r', 'r2']:
+    elif args.metric.lower() in ['pve', 'r', 'r2']:
         metric = '% var expl'
     elif args.metric.lower() in ['n', 'iter', 'niter', 'n_iter']:
         metric = 'Training iterations completed'

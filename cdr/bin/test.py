@@ -31,7 +31,7 @@ if __name__ == '__main__':
     argparser.add_argument('config_paths', nargs='*', help='Path(s) to configuration (*.ini) file')
     argparser.add_argument('-m', '--models', nargs='*', default=[], help='List of models (or model basenames if using -a) to compare. Regex permitted. If unspecified, uses all models.')
     argparser.add_argument('-n', '--n_iter', type=int, default=10000, help='Number of resampling iterations.')
-    argparser.add_argument('-P', '--pool', action='store_true', help='Pool test statistic across models by basename using all ablation configurations common to all configs in ``config_paths``, forces -a. Evaluation data must already exist for all ablation configurations common to all basenames.')
+    argparser.add_argument('-P', '--pool', action='store_true', help='Pool test statistic across models by basename using all ablation configurations common to all configs in ``config_paths``. Only applied to models that are (i) named identically across config files an (ii) have evaluation data for the relevant partition for every config file.')
     argparser.add_argument('-a', '--ablation', action='store_true', help='Only compare models within an ablation set (those defined using the "ablate" param in the config file)')
     argparser.add_argument('-A', '--ablation_components', type=str, nargs='*', help='Names of variables to consider in ablative tests. Useful for excluding some ablated models from consideration')
     argparser.add_argument('-p', '--partition', type=str, default='dev', help='Name of partition to use (one of "train", "dev", "test")')
@@ -45,12 +45,11 @@ if __name__ == '__main__':
     metric = args.metric
     if metric == 'err':
         metric = 'mse'
+    if metric.lower() == 'll':
+        metric = 'loglik'
     assert metric in ['mse', 'loglik', 'corr'], 'Metric must be one of ["mse", "loglik", "corr"].'
 
     if args.pool:
-        args.ablation = True
-        ablations = None
-        basenames_to_pool = None
         exps_outdirs = []
 
     ablation_components = args.ablation_components
@@ -58,8 +57,10 @@ if __name__ == '__main__':
     partitions = get_partition_list(args.partition)
     partition_str = '-'.join(partitions)
 
+    pooled_comparison_sets = None
     for path in args.config_paths:
         p = Config(path)
+        exps_outdirs.append(p.outdir)
 
         model_list = sorted(set(p.model_list) | set(p.ensemble_list))
         models = filter_models(model_list, args.models)
@@ -85,31 +86,22 @@ if __name__ == '__main__':
                             comparison_sets[model_basename].append(model_name)
                     else:
                         comparison_sets[model_basename].append(model_name)
-            if args.pool:
-                ablations_cur = None
-                basenames_to_pool_cur = []
-                for s in comparison_sets:
-                    s_ablated = set([tuple(x.split('!')[1:]) for x in comparison_sets[s]])
-                    if len(s_ablated) > 1:
-                        basenames_to_pool_cur.append(s)
-                        if ablations_cur is None:
-                            ablations_cur = s_ablated
-                        else:
-                            ablations_cur = ablations_cur.intersection(s_ablated)
-                # ablations_cur = sorted(list(ablations_cur))
-                if ablations is None:
-                    ablations = sorted(list(ablations_cur), key=lambda x: len(x))
-                else:
-                    ablations = sorted(set(ablations).intersection(ablations_cur), key=lambda x: len(x))
-                if basenames_to_pool is None:
-                    basenames_to_pool = sorted(basenames_to_pool_cur)
-                else:
-                    basenames_to_pool = sorted(list(set(basenames_to_pool).intersection(set(basenames_to_pool_cur))))
-                exps_outdirs.append(p.outdir)
+            if pooled_comparison_sets is None:
+                pooled_comparison_sets = comparison_sets.copy()
+            else:
+                for comparison_set in comparison_sets:
+                    if comparison_set not in pooled_comparison_sets:
+                        del pooled_comparison_set[comparison_set]
+                    else:
+                        pooled_comparison_sets[comparison_set] = sorted(list(set(pooled_comparison_sets[comparison_set]) & set(comparison_sets[comparison_set])))
         else:
             comparison_sets = {
                 None: cdr_models
             }
+            if pooled_comparison_sets is None:
+                pooled_comparison_sets = comparison_sets.copy()
+            else:
+                pooled_comparison_sets[None] = sorted(list(set(pooled_comparison_sets[None]) & set(comparison_sets[None])))
 
         if not args.pool:
             for s in comparison_sets:
@@ -216,6 +208,8 @@ if __name__ == '__main__':
                                                 summary += 'Model comparison: %s vs %s\n' % (a_model, b_model)
                                                 summary += 'Partition:  %s\n' % partition_str
                                                 summary += 'Metric:     %s\n' % metric
+                                                if a.shape[1] > 1:
+                                                    summary += 'Ens agg fn: %s\n' % args.agg 
                                                 summary += 'n:          %s\n' % a.shape[0]
                                                 if r1 is not None:
                                                     summary += 'r(a,y):     %s\n' % r1
@@ -239,13 +233,13 @@ if __name__ == '__main__':
 
     if args.pool:
         pooled_data = {}
-        for a in ablations:
-            pooled_data[a] = {}
+        for s in pooled_comparison_sets:
+            pooled_data[s] = {}
             for exp_outdir in exps_outdirs:
-                pooled_data[a][exp_outdir] = {}
-                for m in basenames_to_pool:
-                    m_name = '!'.join([m] + list(a)).replace(':', '+')
-                    m_files = extract_cdr_prediction_data(exp_outdir + '/' + m_name)
+                pooled_data[s][exp_outdir] = {}
+                for m in pooled_comparison_sets[s]:
+                    m_name = m.replace(':', '+')
+                    m_files = extract_cdr_prediction_data(exp_outdir + '/' + m_name, metric=metric)
                     for response in m_files:
                         for filenum in m_files[response]:
                             if partition_str in m_files[response][filenum] and \
@@ -267,90 +261,83 @@ if __name__ == '__main__':
                                 else:
                                     v = np.stack([v[x] for x in v], axis=1)
 
-                                if a not in pooled_data:
-                                    pooled_data[a] = {}
-                                if exp_outdir not in pooled_data[a]:
-                                    pooled_data[a][exp_outdir] = {}
-                                if m not in pooled_data[a][exp_outdir]:
-                                    pooled_data[a][exp_outdir][m] = {}
-                                if response not in pooled_data[a][exp_outdir][m]:
-                                    pooled_data[a][exp_outdir][m][response] = {}
-                                pooled_data[a][exp_outdir][m][response][filenum] = v
+                                if s not in pooled_data:
+                                    pooled_data[s] = {}
+                                if exp_outdir not in pooled_data[s]:
+                                    pooled_data[s][exp_outdir] = {}
+                                if m not in pooled_data[s][exp_outdir]:
+                                    pooled_data[s][exp_outdir][m] = {}
+                                if response not in pooled_data[s][exp_outdir][m]:
+                                    pooled_data[s][exp_outdir][m][response] = {}
+                                pooled_data[s][exp_outdir][m][response][filenum] = v
 
-        for i in range(len(ablations)):
-            a1 = ablations[i]
-            m1 = '!'.join(a1)
-            m1_dummy = 'DUMMY' + (('!' + m1) if m1 != '' else m1)
-            for j in range(i + 1, len(ablations)):
-                a2 = ablations[j]
-                m2 = '!'.join(a2)
-                m2_dummy = 'DUMMY' + (('!' + m2) if m2 != '' else m2)
-                is_nested = nested(m1_dummy, m2_dummy)
-                if is_nested:
-                    if m1.count('!') > m2.count('!'):
-                        a_model = a1
-                        b_model = a2
-                        a_name = 'FULL' if m2 == '' else '!' + m2
-                        b_name = 'FULL' if m1 == '' else '!' + m1
-                    else:
-                        a_model = a2
-                        b_model = a1
-                        a_name = 'FULL' if m1 == '' else '!' + m1
-                        b_name = 'FULL' if m2 == '' else '!' + m2
-                    df1 = {}
-                    df2 = {}
-                    for exp in exps_outdirs:
-                        for m in basenames_to_pool:
-                            for response in pooled_data[a_model][exp][m]:
-                                for filenum in pooled_data[a_model][exp][m][response]:
-                                    if response not in df1:
-                                        df1[response] = {}
-                                    if filenum not in df1[response]:
-                                        df1[response][filenum] = []
-                                    if response not in df2:
-                                        df2[response] = {}
-                                    if filenum not in df2[response]:
-                                        df2[response][filenum] = []
-                                    if metric == 'mse':
-                                        a, b = joint_scale(
-                                            pooled_data[a_model][exp][m][response][filenum],
-                                            pooled_data[b_model][exp][m][response][filenum]
-                                        )
-                                    else:
-                                        a = pooled_data[a_model][exp][m][response][filenum]
-                                        b = pooled_data[b_model][exp][m][response][filenum]
-                                    df1[response][filenum].append(a)
-                                    df2[response][filenum].append(b)
-                    for response in df1:
-                        for filenum in df1[response]:
-                            a = df1[response][filenum]
-                            b = df2[response][filenum]
+
+        for s in pooled_comparison_sets:
+            model_set = pooled_comparison_sets[s]
+            if len(model_set) > 1:
+                if s is not None:
+                    stderr('Comparing models within ablation set "%s"...\n' % s)
+                for i in range(len(model_set)):
+                    m1 = model_set[i]
+                    for j in range(i + 1, len(model_set)):
+                        m2 = model_set[j]
+                        is_nested = nested(m1, m2)
+                        if is_nested or not args.ablation:
+                            if m1.count('!') > m2.count('!'):
+                                a_model = m1
+                                b_model = m2
+                                a_name = m2 if m2 else 'FULL'
+                                b_name = m1 if m1 else 'FULL'
+                            else:
+                                a_model = m2
+                                b_model = m1
+                                a_name = m1 if m1 else 'FULL'
+                                b_name = m2 if m2 else 'FULL'
+                            df1 = []
+                            df2 = []
+                            for exp in exps_outdirs:
+                                for response in pooled_data[s][exp][a_model]:
+                                    for filenum in pooled_data[s][exp][b_model][response]:
+                                        if metric == 'mse':
+                                            a, b = joint_scale(
+                                                pooled_data[s][exp][a_model][response][filenum],
+                                                pooled_data[s][exp][b_model][response][filenum]
+                                            )
+                                        else:
+                                            a = pooled_data[s][exp][a_model][response][filenum]
+                                            b = pooled_data[s][exp][b_model][response][filenum]
+                                        df1.append(a)
+                                        df2.append(b)
+                            a = df1
+                            b = df2
                             if not (len(a) and len(b)):
                                 # Need at least one array per model
                                 continue
-
+        
                             if metric == 'corr':
                                 y = np.concatenate([x[0] for x in a], axis=0)
                                 a = np.concatenate([x[1] for x in a], axis=0)
                                 b = np.concatenate([x[1] for x in b], axis=0)
-
+        
                                 y = scale(y)
                                 a = scale(a)
                                 b = scale(b)
-
+        
                                 a = a * y
                                 b = b * y
-
+        
                                 denom = len(y) - 1
                                 r1 = (a.sum(axis=0) / denom).mean()
                                 r2 = (b.sum(axis=0) / denom).mean()
                                 rx = ((a * b).sum(axis=0) / denom).mean()
-
+        
                             else:
                                 a = np.concatenate(a, axis=0)
+                                print(a.shape)
                                 b = np.concatenate(b, axis=0)
+                                print(b.shape)
                                 r1 = r2 = rx = None
-
+        
                             assert len(a) == len(b), 'Shape mismatch between datasets %s and %s: %s vs. %s' % (
                                 a_name,
                                 b_name,
@@ -368,26 +355,25 @@ if __name__ == '__main__':
                             )
                             stderr('\n')
                             name = '%s_v_%s' % (a_name.replace(':', '+'), b_name.replace(':', '+'))
-                            name_base = '%s_PT_pooled_%s_f%s_%s' % (name, response, filenum, partition_str)
+                            name_base = '%s_PT_pooled_%s' % (name, partition_str)
                             outdir = args.outdir
                             if outdir is None:
-                                outdir = p.outdir
+                                outdir = 'signif_pooled' 
                             if not os.path.exists(outdir):
                                 os.makedirs(outdir)
                             out_path = outdir + '/' + name_base + '.txt'
                             with open(out_path, 'w') as f:
                                 stderr('Saving output to %s...\n' % out_path)
-
+        
                                 summary = '=' * 50 + '\n'
                                 summary += 'Model comparison: %s vs %s\n' % (a_name, b_name)
                                 summary += 'Partition: %s\n' % partition_str
                                 summary += 'Metric: %s\n' % metric
+                                if a.shape[1] > 1:
+                                    summary += 'Ens agg fn: %s\n' % args.agg 
                                 summary += 'Experiments pooled:\n'
                                 for exp in exps_outdirs:
                                     summary += '  %s\n' % exp
-                                summary += 'Ablation sets pooled:\n'
-                                for basename in basenames_to_pool:
-                                    summary += '  %s\n' % basename
                                 summary += 'n:          %s\n' % a.shape[0]
                                 if r1 is not None:
                                     summary += 'r(a,y):     %s\n' % r1
@@ -404,10 +390,10 @@ if __name__ == '__main__':
                                     else '**' if p_value > 0.001 else '***'
                                 )
                                 summary += '=' * 50 + '\n'
-
+        
                                 f.write(summary)
                                 sys.stdout.write(summary)
-
+        
                             plt.hist(diffs, bins=1000)
                             plt.savefig(outdir + '/' + name_base + '.png')
                             plt.close('all')
