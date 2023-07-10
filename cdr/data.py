@@ -726,7 +726,14 @@ def compute_filters(Y, filters=None):
             else:
                 stderr('Skipping unique-counts filter for column "%s", which was not found in the data...\n' % name)
         else:
-            stderr('Skipping filter for column "%s", which was not found in the data...\n' % field)
+            _field = re.compile(field)
+            found = False
+            for col in Y:
+                if _field.match(col):
+                    found = True
+                    select &= compute_filter(Y, col, cond)
+            if not found:
+                stderr('Skipping filter for column "%s", which was not found in the data...\n' % field)
     return select
 
 
