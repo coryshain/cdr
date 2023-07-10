@@ -1270,14 +1270,9 @@ class CDRModel(object):
         self.impulse_scale_arr_expanded = s
 
         q = self.impulse_quantiles
-<<<<<<< HEAD
-        if len(self.impulse_names):
-            q = np.stack([q[x] for x in self.impulse_names], axis=1)
-=======
         q = [q[x] for x in self.impulse_names]
         if len(q):
             q = np.stack(q, axis=1)
->>>>>>> 4d10fc5caa7abf3dbf5150d7b6401bae39c760be
         else:
             q = np.zeros((self.N_QUANTILES, 0))
         self.impulse_quantiles_arr = q
