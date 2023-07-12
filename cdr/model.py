@@ -9681,8 +9681,10 @@ class CDRModel(object):
 
         X_ref_in = np.concatenate(X_ref_in, axis=0)
         X_time_ref_in = np.concatenate(X_time_ref_in, axis=0)
+        X_time_ref_in = X_time_ref_in[..., :X_ref_in.shape[-1]]    # Trim in case there are no impulses in the model
         X_mask_ref_in = np.ones_like(X_time_ref_in)
         t_delta_ref_in = np.concatenate(t_delta_ref_in, axis=0)
+        t_delta_ref_in = t_delta_ref_in[..., :X_ref_in.shape[-1]]  # Trim in case there are no impulses in the model
         gf_y_ref_in = np.concatenate(gf_y_ref_in, axis=0)
 
         # Bring manipulations into 1-1 alignment on the batch dimension
