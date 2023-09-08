@@ -5345,7 +5345,7 @@ class CDRModel(object):
                 if self.loss_cutoff_n_sds:
                     assert self.ema_decay, '``ema_decay`` must be provided if ``loss_cutoff_n_sds`` is used'
                     beta = self.ema_decay
-                    ema_warm_up = 0
+                    ema_warm_up = int(1/(1 - self.ema_decay))
                     n_sds = self.loss_cutoff_n_sds
                     step = tf.cast(self.global_batch_step, self.FLOAT_TF)
 
