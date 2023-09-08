@@ -758,9 +758,6 @@ def compute_filter(y, field, cond):
     elif cond.startswith('=='):
         op = '=='
         var = cond[2:].strip()
-    elif cond.startswith('=='):
-        op = '=='
-        var = cond[2:].strip()
     elif cond.startswith('='):
         op = '=='
         var = cond[1:].strip()
