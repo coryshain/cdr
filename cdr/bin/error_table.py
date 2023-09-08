@@ -92,7 +92,7 @@ if __name__ == '__main__':
     ''')
     argparser.add_argument('config_paths', nargs='+', help='Path(s) to config files defining models to compare.')
     argparser.add_argument('-r', '--response', default=None, help='Name of response to evaluate.')
-    argparser.add_argument('-m', '--metric', default='err', help='Metric to report. One of ``["err", "loglik", "iter"]``.')
+    argparser.add_argument('-m', '--metric', default='loglik', help='Metric to report. One of ``["err", "loglik", "pve", "iter"]``.')
     argparser.add_argument('-t', '--task_names', nargs='+', default=None, help='Task names to use (should be in 1-1 alignment with ``config_paths``). If not provided, names will be inferred from config paths.')
     argparser.add_argument('-b', '--baselines',  nargs='+', default=None, help='Models to treat as baselines.')
     argparser.add_argument('-B', '--baseline_names',  nargs='+', default=None, help='Names of baselines (should be in 1-1 alignment with ``baselines``. If not provided, names will be inferred from baselines.')
@@ -109,7 +109,7 @@ if __name__ == '__main__':
         metric = 'MSE'
     elif args.metric.lower() in ['loglik', 'll', 'likelihood']:
         metric = 'Loglik'
-    elif args.metric.lower() in ['r', 'r2']:
+    elif args.metric.lower() in ['pve', 'r', 'r2']:
         metric = '% var expl'
     elif args.metric.lower() in ['n', 'iter', 'niter', 'n_iter']:
         metric = 'Training iterations completed'

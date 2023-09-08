@@ -12,6 +12,10 @@ from .kwargs import MODEL_INITIALIZATION_KWARGS, BAYES_KWARGS, NN_BAYES_KWARGS, 
     PLOT_KWARGS_CORE, PLOT_KWARGS_OTHER
 
 
+PLOT_KEYS_CORE = [x.key for x in PLOT_KWARGS_CORE]
+PLOT_KEYS_OTHER = [x.key for x in PLOT_KWARGS_OTHER]
+
+
 # Thanks to Brice (https://stackoverflow.com/users/140264/brice) at Stack Overflow for this
 def powerset(iterable):
     xs = list(iterable)
@@ -306,8 +310,7 @@ class PlotConfig(object):
 
     def __init__(self, path=None):
         if path is None:
-            self.settings_core = {}
-            self.settings_other = {}
+            self.settings_core, self.settings_other = self.build_plot_settings({})
         else:
             config = configparser.ConfigParser()
             config.optionxform = str
@@ -321,6 +324,15 @@ class PlotConfig(object):
         if item in self.settings_core:
             return self.settings_core[item]
         return self.settings_other[item]
+
+    def __setitem__(self, key, value):
+        if key in PLOT_KEYS_CORE:
+            self.settings_core[key] = value
+        elif key in PLOT_KEYS_OTHER:
+            self.settings_other[key] = value
+        else:
+            raise ValueError('Attempted to set value for unrecognized plot kwarg %s' % key)
+        
 
     def get(self, item, default=None):
         if item in self.settings_core:
@@ -357,10 +369,14 @@ class PlotConfig(object):
                 elif kwarg.key == 'ylim' and val is not None:
                     val = tuple(float(x) for x in val.split())
                 out_core[kwarg.key] = val
+            else:
+                out_core[kwarg.key] = kwarg.default_value
 
         for kwarg in PLOT_KWARGS_OTHER:
             if kwarg.in_settings(settings):
                 val = kwarg.kwarg_from_config(settings)
                 out_other[kwarg.key] = val
+            else:
+                out_other[kwarg.key] = kwarg.default_value
 
         return out_core, out_other

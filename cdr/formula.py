@@ -299,7 +299,9 @@ class Formula(object):
 
     @staticmethod
     def prep_formula_string(s):
-        return s.strip().replace('.(', '(').replace(':', '%').replace('^', '**').replace('.', '_')
+        out = s.strip().replace('.(', '(').replace(':', '%').replace('^', '**')
+        out = re.sub(r'pow([0-9]*)\.([0-9])', r'pow\1_\2', out)
+        return out
 
     @ staticmethod
     def expand_terms(terms):

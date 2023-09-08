@@ -226,6 +226,7 @@ def get_random_variable(
         training=None,
         use_MAP_mode=None,
         epsilon=1e-8,
+        collections=None,
         session=None
 ):
     session = get_session(session)
@@ -273,11 +274,13 @@ def get_random_variable(
             v_q_loc = tf.get_variable(
                 name='%s_q_loc' % name,
                 initializer=loc_initializer,
+                collections=collections,
                 shape=shape
             )
             v_q_scale = tf.get_variable(
                 name='%s_q_scale' % name,
                 initializer=scale_initializer,
+                collections=collections,
                 shape=shape
             )
             v_q_dist = Normal(
@@ -307,6 +310,7 @@ def get_random_variable(
                 initializer=tf.zeros_initializer(),
                 shape=v_eval_sample.shape,
                 dtype=tf.float32,
+                collections=collections,
                 trainable=False
             )
             v_eval_resample = tf.assign(v_eval, v_eval_sample)
@@ -607,7 +611,7 @@ def shifted_gamma_irf_factory(
             cdf_0 = cdf(-delta)
 
             if support_ub is None:
-                ub = 1.
+                ub = tf.convert_to_tensor(1.)
             else:
                 ub = cdf(support_ub - delta)
 
@@ -660,11 +664,11 @@ def normal_irf_factory(
             cdf = dist.cdf
 
             if support_lb is None:
-                lb = 0.
+                lb = tf.convert_to_tensor(0.)
             else:
                 lb = cdf(support_lb)
             if support_ub is None:
-                ub = 1.
+                ub = tf.convert_to_tensor(1.)
             else:
                 ub = cdf(support_ub)
 
@@ -726,11 +730,11 @@ def skew_normal_irf_factory(
             cdf = empirical_integral(irf_base, session=session)
 
             if support_lb is None:
-                lb = 0.
+                lb = tf.convert_to_tensor(0.)
             else:
                 lb = cdf(support_lb)
             if support_ub is None:
-                ub = 1.
+                ub = tf.convert_to_tensor(1.)
             else:
                 ub = cdf(support_ub)
 
@@ -781,11 +785,11 @@ def emg_irf_factory(
                 )(beta * (x - mu))
 
             if support_lb is None:
-                lb = 0.
+                lb = tf.convert_to_tensor(0.)
             else:
                 lb = cdf(support_lb)
             if support_ub is None:
-                ub = 1.
+                ub = tf.convert_to_tensor(1.)
             else:
                 ub = cdf(support_ub)
 
@@ -840,7 +844,7 @@ def beta_prime_irf_factory(
                 return tf.betainc(alpha, beta, x / (1 + x)) * tf.exp(tf.lbeta(alpha, beta))
 
             if support_ub is None:
-                ub = 1
+                ub = tf.convert_to_tensor(1.)
             else:
                 ub = cdf(support_ub)
 
@@ -900,7 +904,7 @@ def shifted_beta_prime_irf_factory(
                 return tf.betainc(alpha, beta, (x - delta) / (1 + x - delta)) * tf.exp(tf.lbeta(alpha, beta))
 
             if support_ub is None:
-                ub = 1
+                ub = tf.convert_to_tensor(1.)
             else:
                 ub = cdf(support_ub - delta)
 
@@ -943,11 +947,11 @@ def double_gamma_1_irf_factory(
     session = get_session(session)
     with session.as_default():
         with session.graph.as_default():
-            alpha_main = 6.
-            alpha_undershoot = 16.
+            alpha_main = tf.convert_to_tensor(6.)
+            alpha_undershoot = tf.convert_to_tensor(16.)
             beta_main = beta
             beta_undershoot = beta
-            c = 1. / 6.
+            c = tf.convert_to_tensor(1. / 6.)
 
             return double_gamma_5_irf_factory(
                 alpha_main=alpha_main,
@@ -988,7 +992,7 @@ def double_gamma_2_irf_factory(
             alpha_undershoot = alpha + 10.
             beta_main = beta
             beta_undershoot = beta
-            c = 1. / 6.
+            c = tf.convert_to_tensor(1. / 6.)
 
             return double_gamma_5_irf_factory(
                 alpha_main=alpha_main,
@@ -2932,6 +2936,8 @@ class BatchNormLayer(object):
     @property
     def regularizable_weights(self):
         out = []
+        if self.rescale_activations:
+            out.append(self.gamma)
         for gf in self.rangf_map:
             if self.shift_activations and self.beta_use_ranef:
                 out.append(self.beta_ran[gf])
@@ -2968,6 +2974,7 @@ class BatchNormLayer(object):
                         name='moving_mean',
                         initializer=tf.zeros_initializer(),
                         shape=shape,
+                        collections=[tf.GraphKeys.GLOBAL_VARIABLES, 'batch_norm'],
                         trainable=False
                     )
                     self.moving_mean_op = None
@@ -2976,6 +2983,7 @@ class BatchNormLayer(object):
                         name='moving_variance',
                         initializer=tf.ones_initializer(),
                         shape=shape,
+                        collections=[tf.GraphKeys.GLOBAL_VARIABLES, 'batch_norm'],
                         trainable=False
                     )
                     self.moving_variance_op = None
@@ -3184,6 +3192,7 @@ class BatchNormLayerBayes(BatchNormLayer):
                         name='moving_mean',
                         initializer=tf.zeros_initializer(),
                         shape=shape,
+                        collections=[tf.GraphKeys.GLOBAL_VARIABLES, 'batch_norm'],
                         trainable=False
                     )
                     self.moving_mean_op = None
@@ -3192,6 +3201,7 @@ class BatchNormLayerBayes(BatchNormLayer):
                         name='moving_variance',
                         initializer=tf.ones_initializer(),
                         shape=shape,
+                        collections=[tf.GraphKeys.GLOBAL_VARIABLES, 'batch_norm'],
                         trainable=False
                     )
                     self.moving_variance_op = None
@@ -3352,6 +3362,8 @@ class LayerNormLayer(object):
     @property
     def regularizable_weights(self):
         out = []
+        if self.rescale_activations:
+            out.append(self.gamma)
         for gf in self.rangf_map:
             if self.shift_activations and self.beta_use_ranef:
                 out.append(self.beta_ran[gf])

@@ -798,7 +798,7 @@ class CDRModel(object):
         self.impulse_max = impulse_max
         self.indicators = indicators
 
-        if len(self.impulse_means) < 100:
+        if len(self.impulse_means) > 1 and len(self.impulse_means) < 100:
             stderr('\r    Computing predictor covariances...\n')
             names = []
             corr_blocks = []
@@ -869,7 +869,9 @@ class CDRModel(object):
                             t_deltas.append(t_delta)
                             t_delta_maxes.append(_Y_time[j] - _X_time[s])
         X_time = np.concatenate(X_time, axis=0)
+        assert np.all(np.isfinite(X_time)), 'Stimulus sequence contained non-finite timestamps'
         Y_time = np.concatenate(Y_time, axis=0)
+        assert np.all(np.isfinite(Y_time)), 'Response sequence contained non-finite timestamps'
         t_deltas = np.concatenate(t_deltas, axis=0)
         t_delta_maxes = np.array(t_delta_maxes)
         t_delta_quantiles = np.quantile(t_deltas, q)
@@ -1193,7 +1195,11 @@ class CDRModel(object):
         self.impulse_df_ix_unique = sorted(list(set(self.impulse_df_ix)))
         self.n_impulse_df = len(self.impulse_df_ix_unique)
         self.impulse_indices = []
-        for i in range(max(self.impulse_df_ix_unique) + 1):
+        if self.impulse_df_ix_unique:
+            max_impulse_df_ix_unique = max(self.impulse_df_ix_unique)
+        else:
+            max_impulse_df_ix_unique = 0
+        for i in range(max_impulse_df_ix_unique + 1):
             arange = np.arange(len(self.form.t.impulses(include_interactions=True)))
             ix = arange[np.where(self.impulse_df_ix == i)[0]]
             self.impulse_indices.append(ix)
@@ -1264,7 +1270,11 @@ class CDRModel(object):
         self.impulse_scale_arr_expanded = s
 
         q = self.impulse_quantiles
-        q = np.stack([q[x] for x in self.impulse_names], axis=1)
+        q = [q[x] for x in self.impulse_names]
+        if len(q):
+            q = np.stack(q, axis=1)
+        else:
+            q = np.zeros((self.N_QUANTILES, 0))
         self.impulse_quantiles_arr = q
         while len(s.shape) < 3:
             q = np.expand_dims(q, axis=1)
@@ -1687,11 +1697,11 @@ class CDRModel(object):
                         tf.convert_to_tensor([
                             self.X_batch_dim,
                             self.history_length + self.future_length,
-                            max(self.n_impulse, 1)
+                            self.n_impulse
                         ]),
                         dtype=self.FLOAT_TF
                     ),
-                    shape=[None, None, max(self.n_impulse, 1)],
+                    shape=[None, None, self.n_impulse],
                     name='X_time'
                 )
                 self.X_mask = tf.placeholder_with_default(
@@ -1699,11 +1709,11 @@ class CDRModel(object):
                         tf.convert_to_tensor([
                             self.X_batch_dim,
                             self.history_length + self.future_length,
-                            max(self.n_impulse, 1)
+                            self.n_impulse
                         ]),
                         dtype=self.FLOAT_TF
                     ),
-                    shape=[None, None, max(self.n_impulse, 1)],
+                    shape=[None, None, self.n_impulse],
                     name='X_mask'
                 )
 
@@ -2314,7 +2324,13 @@ class CDRModel(object):
                         if 'eval_resample' in x:
                             self.resample_ops.append(x['eval_resample'])
                     else:
-                        _coefficient_fixed_base = []
+                        if self.use_distributional_regression:
+                            nparam = self.get_response_nparam(response)
+                        else:
+                            nparam = 1
+                        ndim = self.get_response_ndim(response)
+                        ncoef = 0
+                        _coefficient_fixed_base = tf.zeros([ncoef, nparam, ndim])
                     self.coefficient_fixed_base[response] = _coefficient_fixed_base
 
                     # Random
@@ -4876,6 +4892,7 @@ class CDRModel(object):
                 self.s_bijectors = {}
 
                 for i, response in enumerate(self.response_names):
+                    stderr('\r    Processing response %d/%d...' % (i + 1, self.n_response))
                     self.predictive_distribution[response] = {}
                     self.predictive_distribution_delta[response] = {}
                     self.predictive_distribution_delta_w_interactions[response] = {}
@@ -4992,8 +5009,16 @@ class CDRModel(object):
                     for j, response_param_name in enumerate(response_param_names):
                         dim_names = self.expand_param_name(response, response_param_name)
                         for k, dim_name in enumerate(dim_names):
-                            self.predictive_distribution_delta[response][dim_name] = output_delta[:, 0, 0, j, k]
-                            self.predictive_distribution_delta_w_interactions[response][dim_name] = output_delta_w_interactions[:, 0, 0, j, k]
+                            if self.use_distributional_regression or j == 0:
+                                self.predictive_distribution_delta[response][dim_name] = output_delta[:, 0, 0, j, k]
+                                self.predictive_distribution_delta_w_interactions[response][dim_name] = output_delta_w_interactions[:, 0, 0, j, k]
+                            else:
+                                self.predictive_distribution_delta[response][dim_name] = tf.zeros_like(
+                                    output_delta[:, 0, 0, 0, k]
+                                )
+                                self.predictive_distribution_delta_w_interactions[response][dim_name] = tf.zeros_like(
+                                    output_delta_w_interactions[:, 0, 0, 0, k]
+                                )
 
                     response_dist, response_dist_src, response_params = self._initialize_predictive_distribution_inner(
                         response,
@@ -5156,6 +5181,7 @@ class CDRModel(object):
                         self.error_distribution_plot_ub[response] = err_dist_ub
 
                 self.ll = tf.add_n([self.ll_by_var[x] for x in self.ll_by_var])
+                stderr('\n')
 
     def _initialize_predictive_distribution_inner(self, response, param_type='output'):
         with self.session.as_default():
@@ -5345,7 +5371,7 @@ class CDRModel(object):
                 if self.loss_cutoff_n_sds:
                     assert self.ema_decay, '``ema_decay`` must be provided if ``loss_cutoff_n_sds`` is used'
                     beta = self.ema_decay
-                    ema_warm_up = 0
+                    ema_warm_up = int(1/(1 - self.ema_decay))
                     n_sds = self.loss_cutoff_n_sds
                     step = tf.cast(self.global_batch_step, self.FLOAT_TF)
 
@@ -5494,6 +5520,9 @@ class CDRModel(object):
                 self.ema_map = {}
                 for v in self.ema_vars:
                     self.ema_map[self.ema.average_name(v)] = v
+                for v in tf.get_collection('batch_norm'):
+                    name = ':'.join(v.name.split(':')[:-1])
+                    self.ema_map[name] = v
                 self.ema_saver = tf.train.Saver(self.ema_map)
 
     def _initialize_convergence_checking(self):
@@ -6379,14 +6408,18 @@ class CDRModel(object):
                 if report_time:
                     stderr('_initialize_irf_lambdas took %.2fs\n' % dur)
 
-                for response in self.response_names:
+                if verbose:
+                    stderr('  Initializing IRFs...\n')
+                for resix, response in enumerate(self.response_names):
                     if verbose:
-                        stderr('  Initializing IRFs for response %s...\n' % response)
+                        stderr('\r    Processing response %d/%d...' % (resix + 1, self.n_response))
                     t0 = pytime.time()
                     self._initialize_irfs(self.t, response)
                     dur = pytime.time() - t0
                     if report_time:
                         stderr('_initialize_irfs for %s took %.2fs\n' % (response, dur))
+                if verbose:
+                    stderr('\n')
 
                 if verbose:
                     stderr('  Compiling IRF impulses...\n')
@@ -9648,8 +9681,10 @@ class CDRModel(object):
 
         X_ref_in = np.concatenate(X_ref_in, axis=0)
         X_time_ref_in = np.concatenate(X_time_ref_in, axis=0)
+        X_time_ref_in = X_time_ref_in[..., :X_ref_in.shape[-1]]    # Trim in case there are no impulses in the model
         X_mask_ref_in = np.ones_like(X_time_ref_in)
         t_delta_ref_in = np.concatenate(t_delta_ref_in, axis=0)
+        t_delta_ref_in = t_delta_ref_in[..., :X_ref_in.shape[-1]]  # Trim in case there are no impulses in the model
         gf_y_ref_in = np.concatenate(gf_y_ref_in, axis=0)
 
         # Bring manipulations into 1-1 alignment on the batch dimension

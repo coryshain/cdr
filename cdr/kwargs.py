@@ -459,31 +459,36 @@ MODEL_INITIALIZATION_KWARGS = [
         'lr_decay_family',
         None,
         [str, None],
-        "Functional family for the learning rate decay schedule (no decay if ``None``)."
+        "Functional family for the learning rate decay schedule (no decay if ``None``).",
+        aliases=['learning_rate_decay_family']
     ),
     Kwarg(
         'lr_decay_rate',
         0.,
         float,
-        "coefficient by which to decay the learning rate every ``lr_decay_steps`` (ignored if ``lr_decay_family==None``)."
+        "coefficient by which to decay the learning rate every ``lr_decay_steps`` (ignored if ``lr_decay_family==None``).",
+        aliases=['learning_rate_decay_rate']
     ),
     Kwarg(
         'lr_decay_steps',
         25,
         int,
-        "Span of iterations over which to decay the learning rate by ``lr_decay_rate`` (ignored if ``lr_decay_family==None``)."
+        "Span of iterations over which to decay the learning rate by ``lr_decay_rate`` (ignored if ``lr_decay_family==None``).",
+        aliases=['learning_rate_decay_steps']
     ),
     Kwarg(
         'lr_decay_iteration_power',
         1,
         float,
-        "Power to which the iteration number ``t`` should be raised when computing the learning rate decay."
+        "Power to which the iteration number ``t`` should be raised when computing the learning rate decay.",
+        aliases=['learning_rate_decay_iteration_power']
     ),
     Kwarg(
         'lr_decay_staircase',
         False,
         bool,
-        "Keep learning rate flat between ``lr_decay_steps`` (ignored if ``lr_decay_family==None``)."
+        "Keep learning rate flat between ``lr_decay_steps`` (ignored if ``lr_decay_family==None``).",
+        aliases=['learning_rate_decay_staircase']
     ),
     Kwarg(
         'filter_outlier_losses',
@@ -686,7 +691,7 @@ MODEL_INITIALIZATION_KWARGS = [
     ),
     Kwarg(
         'plot_n_time_units',
-        5,
+        1,
         float,
         "Number of time units to use for plotting."
     ),
@@ -1407,52 +1412,52 @@ PLOT_KWARGS_CORE = [
     ),
     Kwarg(
         'generate_univariate_irf_plots',
-        True,
-        bool,
-        "Whether to plot univariate IRFs over time.",
+        None,
+        [bool, None],
+        "Whether to plot univariate IRFs over time. If ``None``, use model defaults.",
         aliases=['generate_univariate_IRF_plots']
     ),
     Kwarg(
         'generate_univariate_irf_heatmaps',
-        False,
-        bool,
-        "Whether to plot univariate IRF heatmaps over time.",
+        None,
+        [bool, None],
+        "Whether to plot univariate IRF heatmaps over time. If ``None``, use model defaults.",
         aliases=['generate_univariate_IRF_heatmaps']
     ),
     Kwarg(
         'generate_curvature_plots',
-        True,
-        bool,
-        "Whether to plot IRF curvature at time **reference_time**."
+        None,
+        [bool, None],
+        "Whether to plot IRF curvature at time **reference_time**. If ``None``, use model defaults."
     ),
     Kwarg(
         'generate_irf_surface_plots',
-        True,
-        bool,
-        "Whether to plot IRF surfaces.",
+        None,
+        [bool, None],
+        "Whether to plot IRF surfaces. If ``None``, use model defaults.",
         aliases=['generate_IRF_surface_plots']
     ),
     Kwarg(
         'generate_interaction_surface_plots',
-        False,
-        bool,
-        "Whether to plot IRF interaction surfaces at time **reference_time**."
+        None,
+        [bool, None],
+        "Whether to plot IRF interaction surfaces at time **reference_time**. If ``None``, use model defaults."
     ),
     Kwarg(
         'generate_err_dist_plots',
-        False,
-        bool,
-        "Whether to plot the average error distribution for real-valued responses."
+        None,
+        [bool, None],
+        "Whether to plot the average error distribution for real-valued responses. If ``None``, use model defaults."
     ),
     Kwarg(
         'generate_nonstationarity_surface_plots',
-        True,
-        bool,
-        "Whether to plot IRF surfaces showing non-stationarity in the response."
+        None,
+        [bool, None],
+        "Whether to plot IRF surfaces showing non-stationarity in the response. If ``None``, use model defaults."
     ),
     Kwarg(
         'n_samples',
-        None,
+        1000,
         [int, None],
         "Number of posterior samples to draw if Bayesian, ignored otherwise. If ``None``, use model defaults."
     ),
@@ -1470,21 +1475,21 @@ PLOT_KWARGS_CORE = [
     ),
     Kwarg(
         'plot_step',
-        '',
-        str,
-        "Size of step by predictor to take above reference in univariate IRF plots. Structured as space-delimited pairs ``NAME=FLOAT``. Any predictor without a specified step size will inherit from **plot_step_default**."
+        None,
+        [str, None],
+        "Size of step by predictor to take above reference in univariate IRF plots. Structured as space-delimited pairs ``NAME=FLOAT``. Any predictor without a specified step size will inherit from **plot_step_default**. If ``None``, use model defaults."
     ),
     Kwarg(
         'plot_step_default',
-        1.,
-        [str, float],
-        "Default size of step to take above reference in univariate IRF plots, if not specified in **plot_step**. Either a float or the string ``'sd'``, which indicates training sample standard deviation."
+        None,
+        [str, float, None],
+        "Default size of step to take above reference in univariate IRF plots, if not specified in **plot_step**. Either a float or the string ``'sd'``, which indicates training sample standard deviation. If ``None``, use model defaults."
     ),
     Kwarg(
         'reference_time',
-        0.,
-        float,
-        "Timepoint at which to plot interactions."
+        None,
+        [float, None],
+        "Timepoint at which to plot interactions. If ``None``, use model defaults."
     ),
     Kwarg(
         'reference_type',
@@ -1546,27 +1551,27 @@ PLOT_KWARGS_CORE = [
     # AESTHETICS
     Kwarg(
         'plot_n_time_units',
-        5,
-        float,
-        "Number of time units to use for plotting."
+        None,
+        [float, None],
+        "Number of time units to use for plotting. If ``None``, use model defaults."
     ),
     Kwarg(
         'plot_n_time_points',
-        1024,
-        int,
-        "Resolution of plot axis (for 3D plots, uses sqrt of this number for each axis)."
+        None,
+        [int, None],
+        "Resolution of plot axis (for 3D plots, uses sqrt of this number for each axis). If ``None``, use model defaults."
     ),
     Kwarg(
         'plot_x_inches',
-        6.,
-        float,
-        "Width of plot in inches."
+        None,
+        [float, None],
+        "Width of plot in inches. If ``None``, use model defaults."
     ),
     Kwarg(
         'plot_y_inches',
-        4.,
-        float,
-        "Height of plot in inches."
+        None,
+        [float, None],
+        "Height of plot in inches. If ``None``, use model defaults"
     ),
     Kwarg(
         'ylim',
@@ -1588,9 +1593,9 @@ PLOT_KWARGS_CORE = [
     ),
     Kwarg(
         'use_legend',
-        True,
-        bool,
-        "Whether to add legend to univariate IRF plots.",
+        None,
+        [bool, None],
+        "Whether to add legend to univariate IRF plots. If ``None``, use model defaults.",
         aliases=['legend']
     ),
     Kwarg(
@@ -1607,15 +1612,15 @@ PLOT_KWARGS_CORE = [
     ),
     Kwarg(
         'cmap',
-        'gist_rainbow',
-        str,
-        "Name of MatPlotLib cmap specification to use for plotting (determines the color of lines in the plot)."
+        None,
+        [str, None],
+        "Name of MatPlotLib cmap specification to use for plotting (determines the color of lines in the plot). If ``None``, use model defaults."
     ),
     Kwarg(
         'dpi',
-        300,
-        int,
-        "Dots per inch of saved plot image file."
+        None,
+        [int, None],
+        "Dots per inch of saved plot image file. If ``None``, use model defaults."
     ),
     Kwarg(
         'prefix',
@@ -1624,7 +1629,7 @@ PLOT_KWARGS_CORE = [
         "Prefix string to prepend to plot image files."
     ),
     Kwarg(
-        'prefix',
+        'suffix',
         '.png',
         str,
         "File extension to use for plot outputs."
