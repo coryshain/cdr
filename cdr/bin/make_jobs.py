@@ -54,7 +54,7 @@ if __name__ == '__main__':
         c = Config(path)
 
         models = c.model_list
-    
+
         for m in models:
             start_ix = -1
             basename = '_'.join(path[:-4].split('/')[start_ix:] + [m])

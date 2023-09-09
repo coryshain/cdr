@@ -7248,7 +7248,7 @@ class CDRModel(object):
             out += ' ' * (indent+2) + 'r(true, pred):       %s\n' % np.squeeze(rho)
         if loss is not None:
             out += ' ' * (indent+2) + 'Loss:                %s\n' % np.squeeze(loss)
-        if true_variance is not None:
+        if true_variance is not None and percent_variance_explained is not None:  # No point reporting data variance if there's no comparison
             out += ' ' * (indent+2) + 'True variance:       %s\n' % np.squeeze(true_variance)
         if percent_variance_explained is not None:
             out += ' ' * (indent+2) + '%% var expl:          %.2f%%\n' % np.squeeze(percent_variance_explained)
@@ -8755,6 +8755,8 @@ class CDRModel(object):
                         else:
                             _preds = None
                         _y = _y[sel]
+
+                        resid_theoretical_q = None
 
                         if self.is_binary(_response):
                             baseline = np.ones((len(_y),))
