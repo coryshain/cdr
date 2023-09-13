@@ -3422,7 +3422,7 @@ class CDRModel(object):
         if normalizer_use_ranef is None:
             normalizer_use_ranef = self.get_nn_meta('normalizer_use_ranef', nn_id)
         normalize_after_activation = self.get_nn_meta('normalize_after_activation', nn_id)
-        shift_normalized_activations = self.get_nn_meta('shift_normalized_activations', nn_id)
+        shift_normalized_activations = self.get_nn_meta('shift_normalized_activations', nn_id) and use_bias
         rescale_normalized_activations = self.get_nn_meta('rescale_normalized_activations', nn_id)
         weight_sd_init = self.get_nn_meta('weight_sd_init', nn_id)
 
@@ -3477,7 +3477,7 @@ class CDRModel(object):
         if normalizer_use_ranef is None:
             normalizer_use_ranef = self.get_nn_meta('normalizer_use_ranef', nn_id)
         normalize_after_activation = self.get_nn_meta('normalize_after_activation', nn_id)
-        shift_normalized_activations = self.get_nn_meta('shift_normalized_activations', nn_id)
+        shift_normalized_activations = self.get_nn_meta('shift_normalized_activations', nn_id) and use_bias
         rescale_normalized_activations = self.get_nn_meta('rescale_normalized_activations', nn_id)
         weight_sd_init = self.get_nn_meta('weight_sd_init', nn_id)
         bias_sd_init = self.get_nn_meta('bias_sd_init', nn_id)
@@ -3667,172 +3667,6 @@ class CDRModel(object):
             return self._initialize_rnn_bayes(*args, **kwargs)
         return self._initialize_rnn_mle(*args, **kwargs)
 
-    def _initialize_normalization_mle(
-            self,
-            nn_id,
-            batch_normalization_decay=None,
-            layer_normalization_type=None,
-            rangf_map=None,
-            weights_use_ranef=None,
-            biases_use_ranef=None,
-            normalizer_use_ranef=None,
-            final=False,
-            name=None
-    ):
-        if batch_normalization_decay is None:
-            batch_normalization_decay = self.get_nn_meta('batch_normalization_decay', nn_id)
-        if layer_normalization_type is None:
-            layer_normalization_type = self.get_nn_meta('layer_normalization_type', nn_id)
-        if weights_use_ranef is None:
-            weights_use_ranef = not self.get_nn_meta('ranef_bias_only', nn_id)
-        if biases_use_ranef is None:
-            biases_use_ranef = True
-        if normalizer_use_ranef is None:
-            normalizer_use_ranef = self.get_nn_meta('normalizer_use_ranef', nn_id)
-            if not normalizer_use_ranef:
-                rangf_map = None
-        use_batch_normalization = bool(batch_normalization_decay)
-        use_layer_normalization = bool(layer_normalization_type)
-        shift_normalized_activations = self.get_nn_meta('shift_normalized_activations', nn_id)
-        rescale_normalized_activations = self.get_nn_meta('rescale_normalized_activations', nn_id)
-
-        with self.session.as_default():
-            with self.session.graph.as_default():
-                if use_batch_normalization:
-                    normalization = BatchNormLayer(
-                        decay=batch_normalization_decay,
-                        shift_activations=shift_normalized_activations,
-                        rescale_activations=rescale_normalized_activations,
-                        axis=-1,
-                        rangf_map=rangf_map,
-                        beta_use_ranef=biases_use_ranef,
-                        gamma_use_ranef=weights_use_ranef,
-                        training=self.training,
-                        epsilon=self.epsilon,
-                        session=self.session,
-                        name=name
-                    )
-                elif use_layer_normalization:
-                    normalization = LayerNormLayer(
-                        normalization_type=layer_normalization_type,
-                        shift_activations=shift_normalized_activations,
-                        rescale_activations=rescale_normalized_activations,
-                        axis=-1,
-                        rangf_map=rangf_map,
-                        beta_use_ranef=biases_use_ranef,
-                        gamma_use_ranef=weights_use_ranef,
-                        training=self.training,
-                        epsilon=self.epsilon,
-                        session=self.session,
-                        name=name
-                    )
-                else:
-                    def normalization(x):
-                        return x
-
-                return normalization
-    def _initialize_normalization_bayes(
-            self,
-            nn_id,
-            batch_normalization_decay=None,
-            layer_normalization_type=None,
-            rangf_map=None,
-            weights_use_ranef=None,
-            biases_use_ranef=None,
-            normalizer_use_ranef=None,
-            final=False,
-            name=None
-    ):
-        bias_sd_init = self.get_nn_meta('bias_sd_init', nn_id)
-        gamma_sd_init = self.get_nn_meta('gamma_sd_init', nn_id)
-        declare_priors_biases = self.get_nn_meta('declare_priors_biases', nn_id)
-        declare_priors_gamma = self.get_nn_meta('declare_priors_gamma', nn_id)
-
-        if batch_normalization_decay is None:
-            batch_normalization_decay = self.get_nn_meta('batch_normalization_decay', nn_id)
-        if layer_normalization_type is None:
-            layer_normalization_type = self.get_nn_meta('layer_normalization_type', nn_id)
-        if weights_use_ranef is None:
-            weights_use_ranef = not self.get_nn_meta('ranef_bias_only', nn_id)
-        if biases_use_ranef is None:
-            biases_use_ranef = True
-        if normalizer_use_ranef is None:
-            normalizer_use_ranef = self.get_nn_meta('normalizer_use_ranef', nn_id)
-            if not normalizer_use_ranef:
-                rangf_map = None
-        use_batch_normalization = bool(batch_normalization_decay)
-        use_layer_normalization = bool(layer_normalization_type)
-        shift_normalized_activations = self.get_nn_meta('shift_normalized_activations', nn_id)
-        rescale_normalized_activations = self.get_nn_meta('rescale_normalized_activations', nn_id)
-
-        with self.session.as_default():
-            with self.session.graph.as_default():
-                if final:
-                    bias_sd_prior = 1.
-                    gamma_sd_prior = 1.
-                else:
-                    bias_sd_prior = self.get_nn_meta('bias_prior_sd', nn_id)
-                    gamma_sd_prior = self.get_nn_meta('gamma_prior_sd', nn_id)
-                    declare_priors_gamma = self.get_nn_meta('declare_priors_gamma', nn_id)
-
-                if use_batch_normalization:
-                    normalization = BatchNormLayerBayes(
-                        decay=batch_normalization_decay,
-                        shift_activations=shift_normalized_activations,
-                        rescale_activations=rescale_normalized_activations,
-                        axis=-1,
-                        training=self.training,
-                        rangf_map=rangf_map,
-                        beta_use_ranef=biases_use_ranef,
-                        gamma_use_ranef=weights_use_ranef,
-                        use_MAP_mode=self.use_MAP_mode,
-                        declare_priors_scale=declare_priors_gamma,
-                        declare_priors_shift=declare_priors_biases,
-                        scale_sd_prior=gamma_sd_prior,
-                        scale_sd_init=gamma_sd_init,
-                        shift_sd_prior=bias_sd_prior,
-                        shift_sd_init=bias_sd_init,
-                        posterior_to_prior_sd_ratio=self.posterior_to_prior_sd_ratio,
-                        ranef_to_fixef_prior_sd_ratio=self.ranef_to_fixef_prior_sd_ratio,
-                        constraint=self.constraint,
-                        epsilon=self.epsilon,
-                        session=self.session,
-                        name=name
-                    )
-                elif use_layer_normalization:
-                    normalization = LayerNormLayerBayes(
-                        normalization_type=layer_normalization_type,
-                        shift_activations=shift_normalized_activations,
-                        rescale_activations=rescale_normalized_activations,
-                        axis=-1,
-                        training=self.training,
-                        rangf_map=rangf_map,
-                        beta_use_ranef=biases_use_ranef,
-                        gamma_use_ranef=weights_use_ranef,
-                        use_MAP_mode=self.use_MAP_mode,
-                        declare_priors_scale=declare_priors_gamma,
-                        declare_priors_shift=declare_priors_biases,
-                        scale_sd_prior=gamma_sd_prior,
-                        scale_sd_init=gamma_sd_init,
-                        shift_sd_prior=bias_sd_prior,
-                        shift_sd_init=self.bias_sd_init,
-                        posterior_to_prior_sd_ratio=self.posterior_to_prior_sd_ratio,
-                        constraint=self.constraint,
-                        epsilon=self.epsilon,
-                        session=self.session,
-                        name=self.name
-                    )
-                else:
-                    def normalization(x):
-                        return x
-
-                return normalization
-
-    def _initialize_normalization(self, *args, **kwargs):
-        if 'nn' in self.rvs:
-            return self._initialize_normalization_bayes(*args, **kwargs)
-        return self._initialize_normalizationn_mle(*args, **kwargs)
-
     def _initialize_nn(self, nn_id):
         with self.session.as_default():
             with self.session.graph.as_default():
@@ -3867,6 +3701,7 @@ class CDRModel(object):
                 regularize_final_layer = self.get_nn_meta('regularize_final_layer', nn_id)
                 batch_normalization_decay = self.get_nn_meta('batch_normalization_decay', nn_id)
                 layer_normalization_type = self.get_nn_meta('layer_normalization_type', nn_id)
+                normalize_inputs = self.get_nn_meta('normalize_inputs', nn_id)
                 normalize_irf = self.get_nn_meta('normalize_irf', nn_id)
                 normalize_final_layer = self.get_nn_meta('normalize_final_layer', nn_id)
 
@@ -3909,15 +3744,15 @@ class CDRModel(object):
                 if self.has_ff(nn_id):
                     ff_layers = []
                     if normalize_inputs:
-                        layer = self._initialize_normalization(
-                            self,
+                        layer = self._initialize_feedforward(
                             nn_id,
-                            batch_normalization_decay=self.batch_normalization_decay,
-                            layer_normalization_type=self.layer_normalization_type,
+                            0,  # Passing units=0 creates an identity kernel
+                            batch_normalization_decay=batch_normalization_decay,
+                            layer_normalization_type=layer_normalization_type,
                             rangf_map=rangf_map_l1,
-                            final=False,
-                            name='%s_input_normalization' % nn_id
+                            name='%s_ff_input_normalization' % nn_id
                         )
+                        ff_layers.append(layer)
                     for l in range(n_layers_ff + 1):
                         if l == 0 or not ranef_l1_only:
                             _rangf_map = rangf_map_l1
@@ -4106,6 +3941,17 @@ class CDRModel(object):
                     output_ndim = self.get_nn_irf_output_ndim(nn_id)
                     if output_ndim:
                         irf_layers = []
+
+                        if normalize_inputs:
+                            layer = self._initialize_feedforward(
+                                nn_id,
+                                0,  # Passing units=0 creates an identity kernel
+                                batch_normalization_decay=batch_normalization_decay,
+                                layer_normalization_type=layer_normalization_type,
+                                rangf_map=rangf_map_l1,
+                                name='%s_irf_input_normalization' % nn_id
+                            )
+                            irf_layers.append(layer)
 
                         for l in range(n_layers_irf + 1):
                             if l == 0 or not ranef_l1_only:
