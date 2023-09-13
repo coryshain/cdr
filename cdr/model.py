@@ -3858,16 +3858,17 @@ class CDRModel(object):
                 irf_inner_activation = self.get_nn_meta('irf_inner_activation', nn_id)
                 irf_activation = self.get_nn_meta('irf_activation', nn_id)
                 irf_dropout_rate = self.get_nn_meta('irf_dropout_rate', nn_id)
-                normalize_irf = self.get_nn_meta('normalize_irf', nn_id)
                 ranef_dropout_rate = self.get_nn_meta('ranef_dropout_rate', nn_id)
                 input_dropout_rate = self.get_nn_meta('input_dropout_rate', nn_id)
-                batch_normalization_decay = self.get_nn_meta('batch_normalization_decay', nn_id)
-                layer_normalization_type = self.get_nn_meta('layer_normalization_type', nn_id)
                 maxnorm = self.get_nn_meta('maxnorm', nn_id)
                 ranef_l1_only = self.get_nn_meta('ranef_l1_only', nn_id)
                 dropout_final_layer = self.get_nn_meta('dropout_final_layer', nn_id)
                 regularize_initial_layer = self.get_nn_meta('regularize_initial_layer', nn_id)
                 regularize_final_layer = self.get_nn_meta('regularize_final_layer', nn_id)
+                batch_normalization_decay = self.get_nn_meta('batch_normalization_decay', nn_id)
+                layer_normalization_type = self.get_nn_meta('layer_normalization_type', nn_id)
+                normalize_irf = self.get_nn_meta('normalize_irf', nn_id)
+                normalize_final_layer = self.get_nn_meta('normalize_final_layer', nn_id)
 
                 rangf_map = {}
                 if ranef_dropout_rate:
@@ -3929,9 +3930,9 @@ class CDRModel(object):
                             dropout = ff_dropout_rate
                             if normalize_ff:
                                 bn = batch_normalization_decay
+                                ln = layer_normalization_type
                             else:
-                                bn = None
-                            ln = layer_normalization_type
+                                bn = ln = None
                             use_bias = True
                         else:
                             units = 1
@@ -3940,8 +3941,11 @@ class CDRModel(object):
                                 dropout = ff_dropout_rate
                             else:
                                 dropout = None
-                            bn = None
-                            ln = None
+                            if normalize_final_layer:
+                                bn = batch_normalization_decay
+                                ln = layer_normalization_type
+                            else:
+                                bn = ln = None
                             use_bias = False
                         mn = maxnorm
 
@@ -4036,8 +4040,11 @@ class CDRModel(object):
                             else:
                                 units = 1
                             activation = rnn_projection_activation
-                            bn = None
-                            ln = None
+                            if normalize_final_layer:
+                                bn = batch_normalization_decay
+                                ln = layer_normalization_type
+                            else:
+                                bn = ln = None
                             use_bias = False
                         mn = maxnorm
 
@@ -4126,8 +4133,11 @@ class CDRModel(object):
                                     dropout = irf_dropout_rate
                                 else:
                                     dropout = None
-                                bn = None
-                                ln = None
+                                if normalize_final_layer:
+                                    bn = batch_normalization_decay
+                                    ln = layer_normalization_type
+                                else:
+                                    bn = ln = None
                                 use_bias = False
                                 final = True
                                 mn = None
