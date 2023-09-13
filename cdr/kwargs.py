@@ -1153,6 +1153,18 @@ NN_KWARGS = [
         aliases=['normalization_use_gamma', 'batch_normalization_use_gamma', 'layer_normalization_use_gamma']
     ),
     Kwarg(
+        'normalize_inputs',
+        False,
+        bool,
+        "Whether to apply normalization (if applicable) to the inputs.",
+    ),
+    Kwarg(
+        'normalize_final_layer',
+        False,
+        bool,
+        "Whether to apply normalization (if applicable) to the final layer.",
+    ),
+    Kwarg(
         'layer_normalization_type',
         None,
         [str, None],
