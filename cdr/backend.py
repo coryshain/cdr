@@ -1565,7 +1565,7 @@ class DenseLayer(object):
             for gf in self.rangf_map:
                 if self.weights_use_ranef:
                     out.append(self.kernel_ran[gf])
-                if self.use_bias and (not self.normalize_activations or self.normalize_after_activation) and self.biases_use_ranef:
+                if self.use_bias and self.biases_use_ranef:
                     out.append(self.bias_ran[gf])
             if self.normalize_activations:
                 out += self.normalization_layer.regularizable_weights
@@ -1610,7 +1610,7 @@ class DenseLayer(object):
                                         shape=[n_levels, in_dim, out_dim]
                                     )
 
-                            if self.use_bias and (not self.normalize_activations or self.normalize_after_activation):
+                            if self.use_bias:
                                 self.bias = tf.get_variable(
                                     name='bias',
                                     shape=[out_dim],
@@ -1699,7 +1699,7 @@ class DenseLayer(object):
                         else:
                             # Kernel is tensor, custom matmul needed
                             H = matmul(H, kernel)
-                        if self.use_bias and (not self.normalize_activations or self.normalize_after_activation):
+                        if self.use_bias:
                             bias = self.bias[None, ...] # Expand batch dim
                             if self.biases_use_ranef:
                                 for gf in self.bias_ran:
@@ -1891,7 +1891,7 @@ class DenseLayerBayes(DenseLayer):
                                     self.kernel_eval_resample_ran[gf] = rv_dict['v_eval_resample']
                                     self.kernel_ran[gf] = rv_dict['v']
 
-                            if self.use_bias and (not self.normalize_activations or self.normalize_after_activation):
+                            if self.use_bias:
                                 bias_sd_prior = get_numerical_sd(self.bias_sd_prior, in_dim=1, out_dim=1)
                                 if self.bias_sd_init:
                                     bias_sd_posterior = get_numerical_sd(self.bias_sd_init, in_dim=1, out_dim=1)
@@ -2012,7 +2012,7 @@ class DenseLayerBayes(DenseLayer):
                 if self.weights_use_ranef:
                     for gf in self.rangf_map:
                         out.append(self.kernel_eval_resample_ran[gf])
-                if self.use_bias and (not self.normalize_activations or self.normalize_after_activation):
+                if self.use_bias:
                     out.append(self.bias_eval_resample)
                     if self.biases_use_ranef:
                         for gf in self.rangf_map:
