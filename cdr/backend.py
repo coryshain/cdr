@@ -1513,7 +1513,7 @@ class ScaleLayer(object):
                         self.scale = tf.get_variable(
                             name='scale',
                             shape=[units],
-                            initializer=tf.constant_initializer(self.epsilon),
+                            initializer=tf.ones_initializer(),
                         )
                         self.scale_ran = {}
                         for gf in self.rangf_map:
@@ -1629,7 +1629,7 @@ class ScaleLayerBayes(ScaleLayer):
                             'scale',
                             [units],
                             _scale_sd_posterior,
-                            init=self.epsilon,
+                            init=1.,
                             constraint=self.constraint,
                             sd_prior=_scale_sd_prior,
                             training=self.training,
