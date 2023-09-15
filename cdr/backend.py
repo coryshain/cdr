@@ -1302,15 +1302,15 @@ class BiasLayer(object):
             with self.session.as_default():
                 with self.session.graph.as_default():
                     with tf.variable_scope(name, reuse=self.reuse):
-                        self.bias = tf.get_variable(
+                        self.scale = tf.get_variable(
                             name='bias',
                             shape=[units],
                             initializer=tf.zeros_initializer(),
                         )
-                        self.bias_ran = {}
+                        self.scale_ran = {}
                         for gf in self.rangf_map:
                             n_levels = self.rangf_map[gf][0] - 1
-                            self.bias_ran[gf] = tf.get_variable(
+                            self.scale_ran[gf] = tf.get_variable(
                                 name='bias_by_%s' % sn(gf),
                                 initializer=tf.zeros_initializer(),
                                 shape=[n_levels, units]
@@ -1322,8 +1322,8 @@ class BiasLayer(object):
     def regularizable_weights(self):
         out = []
         if self.built and self.rangf_map:
-            for x in self.bias_ran:
-                out.append(self.bias_ran[x])
+            for x in self.scale_ran:
+                out.append(self.scale_ran[x])
 
         return out
 
@@ -1335,10 +1335,10 @@ class BiasLayer(object):
         with self.session.as_default():
             with self.session.graph.as_default():
                 H = inputs
-                bias = self.bias[None, ...] # Expand batch dim
-                for gf in self.bias_ran:
+                bias = self.scale[None, ...] # Expand batch dim
+                for gf in self.scale_ran:
                     Y_gf = self.rangf_map[gf][1]
-                    bias_ran = self.bias_ran[gf]
+                    bias_ran = self.scale_ran[gf]
                     bias_ran -= tf.reduce_mean(bias_ran, axis=0, keepdims=True)
                     bias_ran = tf.pad(bias_ran, [[0,1], [0,0]])
                     bias += tf.gather(bias_ran, Y_gf)
@@ -1468,6 +1468,214 @@ class BiasLayerBayes(BiasLayer):
             out.append(self.bias_eval_resample)
             for gf in self.rangf_map:
                 out.append(self.bias_eval_resample_ran[gf])
+
+        return out
+
+
+class ScaleLayer(object):
+    def __init__(
+            self,
+            training=False,
+            use_MAP_mode=True,
+            rangf_map=None,  # Dict mapping <rangfid>: (n_levels, tensor)
+            reuse=tf.AUTO_REUSE,
+            epsilon=1e-5,
+            session=None,
+            name=None
+    ):
+        self.session = get_session(session)
+        self.reuse = reuse
+        self.epsilon = epsilon
+        self.name = name
+
+        with session.as_default():
+            with session.graph.as_default():
+                self.training = training
+                self.use_MAP_mode = use_MAP_mode
+                if not bool(rangf_map):
+                    rangf_map = {}
+                self.rangf_map = rangf_map
+
+                self.built = False
+
+    def build(self, inputs_shape):
+        if not self.built:
+            units = inputs_shape[-1]
+
+            if not self.name:
+                name = ''
+            else:
+                name = self.name
+
+            with self.session.as_default():
+                with self.session.graph.as_default():
+                    with tf.variable_scope(name, reuse=self.reuse):
+                        self.scale = tf.get_variable(
+                            name='scale',
+                            shape=[units],
+                            initializer=tf.constant_initializer(self.epsilon),
+                        )
+                        self.scale_ran = {}
+                        for gf in self.rangf_map:
+                            n_levels = self.rangf_map[gf][0] - 1
+                            self.scale_ran[gf] = tf.get_variable(
+                                name='scale_by_%s' % sn(gf),
+                                initializer=tf.zeros_initializer(),
+                                shape=[n_levels, units]
+                            )
+
+            self.built = True
+
+    @property
+    def regularizable_weights(self):
+        out = []
+        if self.built and self.rangf_map:
+            for x in self.scale_ran:
+                out.append(self.scale_ran[x])
+
+        return out
+
+    def __call__(self, inputs):
+        if not self.built:
+            self.build(inputs.shape)
+
+        with self.session.as_default():
+            with self.session.graph.as_default():
+                H = inputs
+                scale = self.scale[None, ...] # Expand batch dim
+                for gf in self.scale_ran:
+                    Y_gf = self.rangf_map[gf][1]
+                    scale_ran = self.scale_ran[gf]
+                    scale_ran -= tf.reduce_mean(scale_ran, axis=0, keepdims=True)
+                    scale_ran = tf.pad(scale_ran, [[0,1], [0,0]])
+                    scale += tf.gather(scale_ran, Y_gf)
+                while len(scale.shape) < len(H.shape):
+                    scale = tf.expand_dims(scale, axis=-2)
+                H = H * scale
+
+                return H
+
+    def call(self, *args, **kwargs):
+        self.__call__(*args, **kwargs)
+
+    def kl_penalties(self):
+        return {}
+
+    def ema_ops(self):
+        return []
+
+    def resample_ops(self):
+        return []
+
+
+class ScaleLayerBayes(ScaleLayer):
+    def __init__(
+            self,
+            training=False,
+            use_MAP_mode=True,
+            rangf_map=None,
+            declare_priors=False,
+            sd_prior=1.,
+            sd_init=None,
+            posterior_to_prior_sd_ratio=1,
+            ranef_to_fixef_prior_sd_ratio=1,
+            constraint='softplus',
+            reuse=tf.AUTO_REUSE,
+            epsilon=1e-5,
+            session=None,
+            name=None
+    ):
+        super(ScaleLayerBayes, self).__init__(
+            training=training,
+            use_MAP_mode=use_MAP_mode,
+            rangf_map=rangf_map,
+            reuse=reuse,
+            epsilon=epsilon,
+            session=session,
+            name=name
+        )
+        self.session = get_session(session)
+        with session.as_default():
+            with session.graph.as_default():
+                self.declare_priors = declare_priors
+                self.sd_prior = sd_prior
+                self.sd_init = sd_init
+                self.posterior_to_prior_sd_ratio = posterior_to_prior_sd_ratio
+                self.ranef_to_fixef_prior_sd_ratio = ranef_to_fixef_prior_sd_ratio
+
+                self.constraint = constraint
+                self.kl_penalties_base = {}
+
+    def build(self, inputs_shape):
+        if not self.built:
+            units = inputs_shape[-1]
+            if not self.name:
+                name = ''
+            else:
+                name = self.name
+
+            with self.session.as_default():
+                with self.session.graph.as_default():
+                    with tf.variable_scope(name, reuse=self.reuse):
+                        scale_sd_prior = get_numerical_sd(self.sd_prior, in_dim=1, out_dim=1)
+                        if self.sd_init:
+                            scale_sd_posterior = get_numerical_sd(self.sd_init, in_dim=1, out_dim=1)
+                        else:
+                            scale_sd_posterior = scale_sd_prior * self.posterior_to_prior_sd_ratio
+                        _scale_sd_prior = np.ones([units]) * scale_sd_prior
+                        _scale_sd_posterior = np.ones([units]) * scale_sd_posterior
+
+                        rv_dict = get_random_variable(
+                            'scale',
+                            [units],
+                            _scale_sd_posterior,
+                            init=self.epsilon,
+                            constraint=self.constraint,
+                            sd_prior=_scale_sd_prior,
+                            training=self.training,
+                            use_MAP_mode=self.use_MAP_mode,
+                            epsilon=self.epsilon,
+                            session=self.session
+                        )
+                        if self.declare_priors:
+                            self.kl_penalties_base.update(rv_dict['kl_penalties'])
+                        self.scale_eval_resample = rv_dict['v_eval_resample']
+                        self.scale = rv_dict['v']
+                        self.scale_eval_resample_ran = {}
+                        self.scale_ran = {}
+                        for gf in self.rangf_map:
+                            n_levels = self.rangf_map[gf][0] - 1
+                            _scale_sd_prior = np.ones([n_levels, units]) * scale_sd_prior * self.ranef_to_fixef_prior_sd_ratio
+                            _scale_sd_posterior = np.ones([n_levels, units]) * scale_sd_posterior * self.ranef_to_fixef_prior_sd_ratio
+                            rv_dict = get_random_variable(
+                                'scale_by_%s' % sn(gf),
+                                [n_levels, units],
+                                _scale_sd_posterior,
+                                constraint=self.constraint,
+                                sd_prior=_scale_sd_prior,
+                                training=self.training,
+                                use_MAP_mode=self.use_MAP_mode,
+                                epsilon=self.epsilon,
+                                session=self.session
+                            )
+                            if self.declare_priors:
+                                self.kl_penalties_base.update(rv_dict['kl_penalties'])
+                            self.scale_eval_resample_ran[gf] = rv_dict['v_eval_resample']
+                            self.scale_ran[gf] = rv_dict['v']
+
+            self.built = True
+
+    def kl_penalties(self):
+        with self.session.as_default():
+            with self.session.graph.as_default():
+                return self.kl_penalties_base.copy()
+
+    def resample_ops(self):
+        out = super(ScaleLayerBayes, self).resample_ops()
+        if self.built:
+            out.append(self.scale_eval_resample)
+            for gf in self.rangf_map:
+                out.append(self.scale_eval_resample_ran[gf])
 
         return out
 

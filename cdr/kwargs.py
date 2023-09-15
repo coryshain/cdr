@@ -947,6 +947,13 @@ NN_KWARGS = [
         aliases=['rescale_time', 'rescale_tdelta']
     ),
     Kwarg(
+        'nn_use_input_scaler',
+        False,
+        bool,
+        "Whether to apply a Hadamard scaling layer to the inputs to any NN components.",
+        aliases=['use_input_scaler']
+    ),
+    Kwarg(
         'log_transform_t_delta',
         False,
         bool,

@@ -3398,6 +3398,137 @@ class CDRModel(object):
 
     # NN INITIALIZATION
 
+    def _initialize_bias_mle(
+            self,
+            nn_id,
+            rangf_map=None,
+            use_ranef=None,
+            name=None
+    ):
+        if use_ranef is None:
+            use_ranef = True
+        if not use_ranef:
+            rangf_map = None
+
+        with self.session.as_default():
+            with self.session.graph.as_default():
+                bias = ScaleLayer(
+                    training=self.training,
+                    use_MAP_mode=self.use_MAP_mode,
+                    rangf_map=rangf_map,
+                    epsilon=self.epsilon,
+                    session=self.session,
+                    name=name
+                )
+
+                return bias
+
+    def _initialize_bias_bayes(
+            self,
+            nn_id,
+            rangf_map=None,
+            use_ranef=None,
+            name=None
+    ):
+        if use_ranef is None:
+            use_ranef = True
+        if not use_ranef:
+            rangf_map = None
+
+        declare_priors = self.get_nn_meta('declare_priors_biases', nn_id)
+        sd_prior = self.get_nn_meta('bias_prior_sd', nn_id)
+        sd_init = self.get_nn_meta('bias_sd_init', nn_id)
+
+        with self.session.as_default():
+            with self.session.graph.as_default():
+                bias = ScaleLayerBayes(
+                    training=self.training,
+                    use_MAP_mode=self.use_MAP_mode,
+                    rangf_map=rangf_map,
+                    declare_priors=declare_priors,
+                    sd_prior=sd_prior,
+                    sd_init=sd_init,
+                    posterior_to_prior_sd_ratio=self.posterior_to_prior_sd_ratio,
+                    ranef_to_fixef_prior_sd_ratio=self.ranef_to_fixef_prior_sd_ratio,
+                    constraint=self.constraint,
+                    epsilon=self.epsilon,
+                    session=self.session,
+                    name=name
+                )
+
+                return bias
+
+    def _initialize_bias(self, *args, **kwargs):
+        if 'nn' in self.rvs:
+            return self._initialize_bias_bayes(*args, **kwargs)
+        return self._initialize_bias_mle(*args, **kwargs)
+
+
+    def _initialize_scale_mle(
+            self,
+            nn_id,
+            rangf_map=None,
+            use_ranef=None,
+            name=None
+    ):
+        if use_ranef is None:
+            use_ranef = True
+        if not use_ranef:
+            rangf_map = None
+
+        with self.session.as_default():
+            with self.session.graph.as_default():
+                bias = ScaleLayer(
+                    training=self.training,
+                    use_MAP_mode=self.use_MAP_mode,
+                    rangf_map=rangf_map,
+                    epsilon=self.epsilon,
+                    session=self.session,
+                    name=name
+                )
+
+                return bias
+
+    def _initialize_scale_bayes(
+            self,
+            nn_id,
+            rangf_map=None,
+            use_ranef=None,
+            name=None
+    ):
+        if use_ranef is None:
+            use_ranef = True
+        if not use_ranef:
+            rangf_map = None
+
+        declare_priors = self.get_nn_meta('declare_priors_weights', nn_id)
+        sd_prior = self.get_nn_meta('weight_prior_sd', nn_id)
+        sd_init = self.get_nn_meta('weight_sd_init', nn_id)
+
+        with self.session.as_default():
+            with self.session.graph.as_default():
+                bias = ScaleLayerBayes(
+                    training=self.training,
+                    use_MAP_mode=self.use_MAP_mode,
+                    rangf_map=rangf_map,
+                    declare_priors=declare_priors,
+                    sd_prior=sd_prior,
+                    sd_init=sd_init,
+                    posterior_to_prior_sd_ratio=self.posterior_to_prior_sd_ratio,
+                    ranef_to_fixef_prior_sd_ratio=self.ranef_to_fixef_prior_sd_ratio,
+                    constraint=self.constraint,
+                    epsilon=self.epsilon,
+                    session=self.session,
+                    name=name
+                )
+
+                return bias
+
+    def _initialize_scale(self, *args, **kwargs):
+        if 'nn' in self.rvs:
+            return self._initialize_bias_bayes(*args, **kwargs)
+        return self._initialize_bias_mle(*args, **kwargs)
+
     def _initialize_feedforward_mle(
             self,
             nn_id,
@@ -3704,6 +3835,7 @@ class CDRModel(object):
                 normalize_inputs = self.get_nn_meta('normalize_inputs', nn_id)
                 normalize_irf = self.get_nn_meta('normalize_irf', nn_id)
                 normalize_final_layer = self.get_nn_meta('normalize_final_layer', nn_id)
+                nn_use_input_scaler = self.get_nn_meta('nn_use_input_scaler', nn_id)
 
                 rangf_map = {}
                 if ranef_dropout_rate:
@@ -3743,6 +3875,15 @@ class CDRModel(object):
                 # FEEDFORWARD ENCODER
                 if self.has_ff(nn_id):
                     ff_layers = []
+                    if nn_use_input_scaler:
+                        scale_layer = self._initialize_scale(
+                            nn_id,
+                            rangf_map=rangf_map_l1,
+                            name='%s_ff_input_scaler' % nn_id
+                        )
+                        self.regularizable_layers[nn_id].append(scale_layer)
+                        ff_layers.append(scale_layer)
+
                     if normalize_inputs:
                         layer = self._initialize_feedforward(
                             nn_id,
@@ -3826,6 +3967,16 @@ class CDRModel(object):
                     rnn_layers = []
                     rnn_h_ema = []
                     rnn_c_ema = []
+
+                    if nn_use_input_scaler:
+                        scale_layer = self._initialize_scale(
+                            nn_id,
+                            rangf_map=rangf_map_l1,
+                            name='%s_rnn_input_scaler' % nn_id
+                        )
+                        self.regularizable_layers[nn_id].append(scale_layer)
+                        rnn_layers.append(scale_layer)
+
                     for l in range(n_layers_rnn):
                         units = n_units_rnn[l]
                         if l == 0:
@@ -3941,6 +4092,15 @@ class CDRModel(object):
                     output_ndim = self.get_nn_irf_output_ndim(nn_id)
                     if output_ndim:
                         irf_layers = []
+
+                        if nn_use_input_scaler:
+                            scale_layer = self._initialize_scale(
+                                nn_id,
+                                rangf_map=rangf_map_l1,
+                                name='%s_irf_input_scaler' % nn_id
+                            )
+                            self.regularizable_layers[nn_id].append(scale_layer)
+                            irf_layers.append(scale_layer)
 
                         if normalize_inputs:
                             layer = self._initialize_feedforward(
