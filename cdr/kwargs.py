@@ -287,16 +287,16 @@ MODEL_INITIALIZATION_KWARGS = [
         'use_distributional_regression',
         False,
         bool,
-        "Whether to model all parameters of the predictive distribution as dependent on IRFs of the impulses (distributional regression). If ``False``, only the mean depends on the predictors (other parameters of the predictive distribution are treated as constant).",
+        "Whether to model all parameters of the response distribution as dependent on IRFs of the impulses (distributional regression). If ``False``, only the mean depends on the predictors (other parameters of the response distribution are treated as constant).",
         aliases=['heteroscedastic', 'heteroskedastic'],
         default_value_cdrnn=True
     ),
     Kwarg(
-        'predictive_distribution_map',
+        'response_distribution_map',
         None,
         [str, None],
-        "Definition of predictive distribution. Can be a single distribution name (shared across all response variables), a space-delimited list of distribution names (one per response variable), a space-delimited list of ';'-delimited tuples matching response variables to distribution names (e.g. ``response;Bernoulli``), or ``None``, in which case the predictive distribution will be inferred as ``Normal`` for continuous variables and ``Categorical`` for categorical variables.",
-        aliases=['predictive_distribution', 'pred_dist']
+        "Definition of response distribution. Can be a single distribution name (shared across all response variables), a space-delimited list of distribution names (one per response variable), a space-delimited list of ';'-delimited tuples matching response variables to distribution names (e.g. ``response;Bernoulli``), or ``None``, in which case the response distribution will be inferred as ``Normal`` for continuous variables and ``Categorical`` for categorical variables.",
+        aliases=['response_distribution', 'predictive_distribution_map', 'predictive_distribution', 'pred_dist']
     ),
     Kwarg(
         'center_inputs',
@@ -336,7 +336,7 @@ MODEL_INITIALIZATION_KWARGS = [
         'asymmetric_error',
         False,
         bool,
-        "Whether to model numeric responses by default with an (asymmetric) SinhArcshin transform of the Normal distribution. Otherwise, defaults to a Normal distribution. Only affects response variables whose distributions have not been explicitly specified using **predictive_distribution_map**."
+        "Whether to model numeric responses by default with an (asymmetric) SinhArcshin transform of the Normal distribution. Otherwise, defaults to a Normal distribution. Only affects response variables whose distributions have not been explicitly specified using **response_distribution_map**."
     ),
     Kwarg(
         'constraint',
@@ -431,11 +431,11 @@ MODEL_INITIALIZATION_KWARGS = [
         "Epsilon parameter to use for numerical stability in bounded parameter estimation (imposes a positive lower bound on the parameter)."
     ),
     Kwarg(
-        'pred_dist_epsilon',
+        'response_dist_epsilon',
         1e-2,
         float,
-        "Epsilon parameter to use for numerical stability in bounded parameters of the predictive distribution (imposes a positive lower bound on the parameter).",
-        aliases=['epsilon']
+        "Epsilon parameter to use for numerical stability in bounded parameters of the response distribution (imposes a positive lower bound on the parameter).",
+        aliases=['pred_dist_epsilon', 'epsilon']
     ),
     Kwarg(
         'optim_epsilon',
@@ -1427,7 +1427,7 @@ PLOT_KWARGS_CORE = [
         'response_params',
         None,
         [str, None],
-        "Name(s) of parameter(s) of predictive distribution to plot for each response variable. If ``None``, plots the first parameter only. Parameter names not present in a given distribution will be skipped."
+        "Name(s) of parameter(s) of response distribution to plot for each response variable. If ``None``, plots the first parameter only. Parameter names not present in a given distribution will be skipped."
     ),
     Kwarg(
         'generate_univariate_irf_plots',

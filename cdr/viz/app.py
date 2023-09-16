@@ -22,7 +22,7 @@ SCREEN_DPI = 72
 def get_resparams(model, response):
     resparams = []
     if response in model.response_names:
-        for x in model.predictive_distribution_delta[response]:
+        for x in model.response_distribution_delta[response]:
             for y in model.expand_param_name(response, x):
                 resparams.append(y)
     return resparams

@@ -159,7 +159,7 @@ class Formula(object):
         'HRF': 'HRFDoubleGamma5',
     }
 
-    PREDICTIVE_DISTRIBUTIONS = {
+    RESPONSE_DISTRIBUTIONS = {
         'normal': {
             'dist': 'Normal',
             'name': 'normal',
@@ -1060,7 +1060,7 @@ class Formula(object):
         coef_id = None
         ranirf = False
         trainable = None
-        pred_params = None
+        response_params = None
         param_init={}
         nn_config = {}
         impulses_as_inputs = True
@@ -1108,30 +1108,30 @@ class Formula(object):
                             trainable.append(x.s)
                         else:
                             raise ValueError('Unrecognized value for element of trainable: %s' % x)
-                elif k.arg == 'pred_params':
-                    assert type(k.value).__name__ == 'List', 'Non-list argument provided to keyword arg "pred_params"'
-                    pred_params = []
+                elif k.arg == 'response_params':
+                    assert type(k.value).__name__ == 'List', 'Non-list argument provided to keyword arg "response_params"'
+                    response_params = []
                     for x in k.value.elts:
                         if type(x).__name__ == 'Constant':
-                            assert isinstance(x.value, str), 'pred_params item must be interpretable as a string'
+                            assert isinstance(x.value, str), 'response_params item must be interpretable as a string'
                             x = x.value
                         elif type(x).__name__ == 'Name':
                             x = x.id
                         elif type(x).__name__ == 'Str':
                             x = x.s
                         else:
-                            raise ValueError('Unrecognized value for element of pred_params: %s' % x)
+                            raise ValueError('Unrecognized value for element of response_params: %s' % x)
                         x = x.split('_')
                         if len(x) == 1:
                             x = (None, x[0])
                         x = tuple(x)
                         if len(x) != 2:
-                            raise ValueError('Element of pred_params must either be the name of a distributional parameter or a "_"-delimited pair of distribution name and parameter name.')
-                        assert x[0] is None or x[0] in Formula.PREDICTIVE_DISTRIBUTIONS, 'Distribution name %s not currently supported' % x[0]
+                            raise ValueError('Element of response_params must either be the name of a distributional parameter or a "_"-delimited pair of distribution name and parameter name.')
+                        assert x[0] is None or x[0] in Formula.RESPONSE_DISTRIBUTIONS, 'Distribution name %s not currently supported' % x[0]
                         if x[0] is not None:
-                            assert x[1] in Formula.PREDICTIVE_DISTRIBUTIONS[x[0]]['params'], 'Parameter %s not found for distribution %s.' % (x[1], x[0])
+                            assert x[1] in Formula.RESPONSE_DISTRIBUTIONS[x[0]]['params'], 'Parameter %s not found for distribution %s.' % (x[1], x[0])
 
-                        pred_params.append(x)
+                        response_params.append(x)
 
                 elif t.func.id == 'NN' and k.arg == 'impulses_as_inputs':
                     impulses_as_inputs = get_bool(k)
@@ -1208,7 +1208,7 @@ class Formula(object):
                 inputs_to_add=inputs_to_add,
                 inputs_to_drop=inputs_to_drop,
                 trainable=trainable,
-                pred_params_list=pred_params
+                response_params_list=response_params
             )
 
             new.add_child(input_irf)
@@ -2284,10 +2284,10 @@ class NNImpulse(object):
 
         self.id = ':'.join([x.id for x in sorted(self.atomic_impulses, key=lambda x: x.id)])
 
-        self.pred_params = None
+        self.response_params = None
     
     def __setstate__(self, state):
-        self.pred_params = state.pop('pred_params', None)
+        self.response_params = state.pop('response_params', None)
         for key in state:
             if key != 'nn_key':
                 setattr(self, key, state[key])
@@ -2411,7 +2411,7 @@ class NN(object):
         inputs_added = set()
         inputs_dropped = set()
         names = set()
-        pred_params = None
+        response_params = None
         for x in nodes:
             names.add(x.name())
             _nodes.append(x)
@@ -2419,18 +2419,18 @@ class NN(object):
             nn_inputs |= set(x.nn_inputs)
             inputs_added |= set(x.inputs_added)
             inputs_dropped |= set(x.inputs_dropped)
-            if x.pred_params:
-                if pred_params is None:
-                    pred_params = {}
-                for k in x.pred_params:
-                    if k not in pred_params:
-                        pred_params[k] = set()
-                    pred_params[k] |= x.pred_params[k]
+            if x.response_params:
+                if response_params is None:
+                    response_params = {}
+                for k in x.response_params:
+                    if k not in response_params:
+                        response_params[k] = set()
+                    response_params[k] |= x.response_params[k]
         self.nn_impulses = tuple(sorted(list(nn_impulses), key=lambda x: x.name()))
         self.nn_inputs = tuple(sorted(list(nn_inputs), key=lambda x: x.name()))
         self.inputs_added = tuple(sorted(list(inputs_added), key=lambda x: x.name()))
         self.inputs_dropped = tuple(sorted(list(inputs_dropped), key=lambda x: x.name()))
-        self.pred_params = pred_params
+        self.response_params = response_params
         self.nodes = tuple(sorted([x for x in _nodes], key=lambda x: x.name()))
         self.nn_type = nn_type
         self.name_str = ', '.join([str(x) for x in self.nodes])
@@ -2446,7 +2446,7 @@ class NN(object):
         self.rangf = rangf
 
     def __setstate__(self, state):
-        self.pred_params = state.pop('pred_params', None)
+        self.response_params = state.pop('response_params', None)
         for key in state:
             setattr(self, key, state[key])
 
@@ -2628,7 +2628,7 @@ class IRFNode(object):
     :param inputs_to_drop: ``list`` of ``Impulse``/``NNImpulse`` or ``None``; list of impulses to remove from input of neural network IRF (keeping them in output).
     :param param_init: ``dict``; map from parameter names to initial values, which will also be used as prior means.
     :param trainable: ``list`` of ``str``, or ``None``; trainable parameters at this node. If ``None``, all parameters are trainable.
-    :param pred_params_list: ``list`` of 2-``tuple`` of ``str``, or ``None``; Predictive distribution parameters modeled by this IRF, with each parameter represented as a pair (DIST_NAME, PARAM_NAME). DIST_NAME can be ``None``, in which case the IRF will apply to any distribution parameter matching PARAM_NAME.
+    :param response_params_list: ``list`` of 2-``tuple`` of ``str``, or ``None``; Response distribution parameters modeled by this IRF, with each parameter represented as a pair (DIST_NAME, PARAM_NAME). DIST_NAME can be ``None``, in which case the IRF will apply to any distribution parameter matching PARAM_NAME.
     """
 
     def __init__(
@@ -2648,7 +2648,7 @@ class IRFNode(object):
             inputs_to_drop=None,
             param_init=None,
             trainable=None,
-            pred_params_list=None
+            response_params_list=None
     ):
         family = Formula.normalize_irf_family(family)
         if family is None or family in ['Terminal', 'DiracDelta']:
@@ -2744,16 +2744,16 @@ class IRFNode(object):
                 if param in trainable:
                     new_trainable.append(param)
             self.trainable = new_trainable
-        self.pred_params_list = pred_params_list
-        _pred_params = None
-        if pred_params_list is not None:
-            assert family == 'NN', 'pred_params is currently only supported for IRFs of type ``NN``'
-            _pred_params = {}
-            for dist_name, param_name in pred_params_list:
-                if dist_name not in _pred_params:
-                    _pred_params[dist_name] = set()
-                _pred_params[dist_name].add(param_name)
-        self.pred_params = _pred_params
+        self.response_params_list = response_params_list
+        _response_params = None
+        if response_params_list is not None:
+            assert family == 'NN', 'response_params is currently only supported for IRFs of type ``NN``'
+            _response_params = {}
+            for dist_name, param_name in response_params_list:
+                if dist_name not in _response_params:
+                    _response_params[dist_name] = set()
+                _response_params[dist_name].add(param_name)
+        self.response_params = _response_params
 
         self.children = []
         self.p = p
@@ -2763,7 +2763,7 @@ class IRFNode(object):
         self.interaction_list = []
 
     def __setstate__(self, state):
-        self.pred_params = state.pop('pred_params', None)
+        self.response_params = state.pop('response_params', None)
         for key in state:
             if key != 'nn_key':
                 setattr(self, key, state[key])
@@ -2780,14 +2780,14 @@ class IRFNode(object):
                     out += '_dropped:' + '_'.join([x.name() for x in self.inputs_dropped])
                 if self.inputs_added:
                     out += '_added:' + '_'.join([x.name() for x in self.inputs_added])
-                if self.pred_params:
+                if self.response_params:
                     vals = []
-                    for key in self.pred_params:
+                    for key in self.response_params:
                         if key is None:
-                            val = 'any:' + '-'.join(sorted(self.pred_params[key]))
+                            val = 'any:' + '-'.join(sorted(self.response_params[key]))
                         else:
-                            val = key + ':' + '-'.join([x for x in Formula.PREDICTIVE_DISTRIBUTIONS[key]['params'] \
-                                                        if x in self.pred_params[key]])
+                            val = key + ':' + '-'.join([x for x in Formula.RESPONSE_DISTRIBUTIONS[key]['params'] \
+                                                        if x in self.response_params[key]])
                         vals.append(val)
                     out += '_' + '_'.join(vals)
         return out
@@ -2950,14 +2950,14 @@ class IRFNode(object):
                 out += '_dropped:' + '_'.join([x.name() for x in self.inputs_dropped])
             if self.inputs_added:
                 out += '_added:' + '_'.join([x.name() for x in self.inputs_added])
-            if self.pred_params:
+            if self.response_params:
                 vals = []
-                for key in self.pred_params:
+                for key in self.response_params:
                     if key is None:
-                        val = 'any:' + '-'.join(sorted(self.pred_params[key]))
+                        val = 'any:' + '-'.join(sorted(self.response_params[key]))
                     else:
-                        val = key + ':' + '-'.join([x for x in Formula.PREDICTIVE_DISTRIBUTIONS[key]['params'] \
-                                                    if x in self.pred_params[key]])
+                        val = key + ':' + '-'.join([x for x in Formula.RESPONSE_DISTRIBUTIONS[key]['params'] \
+                                                    if x in self.response_params[key]])
                     vals.append(val)
                 out += '_' + '_'.join(vals)
         else:
@@ -3005,20 +3005,20 @@ class IRFNode(object):
                 params.append(', '.join(['%s=%s' % (x, self.param_init[x]) for x in self.param_init]))
             if set(self.trainable) != set(Formula.irf_params(self.family)):
                 params.append('trainable=%s' % self.trainable)
-            if self.pred_params:
+            if self.response_params:
                 vals = []
-                for dist_name in self.pred_params:
+                for dist_name in self.response_params:
                     if dist_name is None:
-                        param_names = sorted(self.pred_params[dist_name])
+                        param_names = sorted(self.response_params[dist_name])
                     else:
-                        param_names = [x for x in Formula.PREDICTIVE_DISTRIBUTIONS[dist_name]['params'] \
-                                       if x in self.pred_params[dist_name]]
+                        param_names = [x for x in Formula.RESPONSE_DISTRIBUTIONS[dist_name]['params'] \
+                                       if x in self.response_params[dist_name]]
                     for param_name in param_names:
                         if dist_name is None:
                             vals.append(param_name)
                         else:
                             vals.append('_'.join((dist_name, param_name)))
-                params.append('pred_params=[%s]' % ','.join(vals))
+                params.append('response_params=[%s]' % ','.join(vals))
             if self.family == 'NN':
                 if not self.impulses_as_inputs:
                     params.append('impulses_as_inputs=False')
@@ -3873,7 +3873,7 @@ class IRFNode(object):
                     inputs_to_drop=self.inputs_dropped,
                     param_init=self.param_init,
                     trainable=self.trainable,
-                    pred_params_list=self.pred_params_list
+                    response_params_list=self.response_params_list
                 )
                 irf_expansion.append(new_irf)
 
@@ -3910,7 +3910,7 @@ class IRFNode(object):
                     inputs_to_drop=self.inputs_dropped,
                     param_init=self.param_init,
                     trainable=self.trainable,
-                    pred_params_list=self.pred_params_list
+                    response_params_list=self.response_params_list
                 )
                 new_irf.add_child(c)
                 self_transformed.append(new_irf)
@@ -4117,7 +4117,7 @@ class IRFNode(object):
                     inputs_to_drop=self.inputs_dropped,
                     param_init=self.param_init,
                     trainable=self.trainable,
-                    pred_params_list=self.pred_params_list
+                    response_params_list=self.response_params_list
                 )
                 irf_expansion.append(new_irf)
 
@@ -4154,7 +4154,7 @@ class IRFNode(object):
                     inputs_to_drop=self.inputs_dropped,
                     param_init=self.param_init,
                     trainable=self.trainable,
-                    pred_params_list=self.pred_params_list
+                    response_params_list=self.response_params_list
                 )
                 new_irf.add_child(c)
                 self_transformed.append(new_irf)
@@ -4340,14 +4340,14 @@ class IRFNode(object):
             s += '; rangf: ' + ','.join(self.rangf)
         if len(self.trainable) > 0:
             s +=  '; trainable params: ' + ', '.join(self.trainable)
-        if self.pred_params:
+        if self.response_params:
             vals = []
-            for key in self.pred_params:
+            for key in self.response_params:
                 if key is None:
-                    val = 'any: ' + ', '.join(sorted(self.pred_params[key]))
+                    val = 'any: ' + ', '.join(sorted(self.response_params[key]))
                 else:
-                    val = key + ': ' + ', '.join([x for x in Formula.PREDICTIVE_DISTRIBUTIONS[key]['params'] \
-                                                  if x in self.pred_params[key]])
+                    val = key + ': ' + ', '.join([x for x in Formula.RESPONSE_DISTRIBUTIONS[key]['params'] \
+                                                  if x in self.response_params[key]])
                 vals.append(val)
             s += '; ' + '; '.join(vals)
         if self.family == 'NN':

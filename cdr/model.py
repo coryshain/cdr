@@ -558,9 +558,9 @@ class CDRModel(object):
     }
 
     N_QUANTILES = 41
-    PREDICTIVE_DISTRIBUTIONS = Formula.PREDICTIVE_DISTRIBUTIONS.copy()
-    for x in PREDICTIVE_DISTRIBUTIONS:
-        PREDICTIVE_DISTRIBUTIONS[x]['dist'] = globals()[PREDICTIVE_DISTRIBUTIONS[x]['dist']]
+    RESPONSE_DISTRIBUTIONS = Formula.RESPONSE_DISTRIBUTIONS.copy()
+    for x in RESPONSE_DISTRIBUTIONS:
+        RESPONSE_DISTRIBUTIONS[x]['dist'] = globals()[RESPONSE_DISTRIBUTIONS[x]['dist']]
 
     def __init__(self, form, X, Y, ablated=None, build=True, **kwargs):
         super(CDRModel, self).__init__()
@@ -994,14 +994,14 @@ class CDRModel(object):
         self.rangf = f.rangf
         self.ranef_group2ix = {x: i for i, x in enumerate(self.rangf)}
 
-        self.X_weighted_unscaled = {}  # Key order: <response>; Value: nbatch x ntime x ncoef x nparam x ndim tensor of IRF-weighted values at each timepoint of each predictor for each predictive distribution parameter of the response
-        self.X_weighted_unscaled_sumT = {}  # Key order: <response>; Value: nbatch x ncoef x nparam x ndim tensor of IRF-weighted values of each predictor for each predictive distribution parameter of the response
-        self.X_weighted_unscaled_sumK = {}  # Key order: <response>; Value: nbatch x time x nparam x ndim tensor of IRF-weighted values at each timepoint for each predictive distribution parameter of the response
-        self.X_weighted_unscaled_sumTK = {}  # Key order: <response>; Value: nbatch x nparam x ndim tensor of IRF-weighted values for each predictive distribution parameter of the response
-        self.X_weighted = {}  # Key order: <response>; Value: nbatch x ntime x ncoef x nparam x ndim tensor of IRF-weighted values at each timepoint of each predictor for each predictive distribution parameter of the response
-        self.X_weighted_sumT = {}  # Key order: <response>; Value: nbatch x ncoef x nparam x ndim tensor of IRF-weighted values of each predictor for each predictive distribution parameter of the response
-        self.X_weighted_sumK = {}  # Key order: <response>; Value: nbatch x ntime x nparam x ndim tensor of IRF-weighted values at each timepoint for each predictive distribution parameter of the response
-        self.X_weighted_sumTK = {}  # Key order: <response>; Value: nbatch x nparam x ndim tensor of IRF-weighted values for each predictive distribution parameter of the response
+        self.X_weighted_unscaled = {}  # Key order: <response>; Value: nbatch x ntime x ncoef x nparam x ndim tensor of IRF-weighted values at each timepoint of each predictor for each response distribution parameter of the response
+        self.X_weighted_unscaled_sumT = {}  # Key order: <response>; Value: nbatch x ncoef x nparam x ndim tensor of IRF-weighted values of each predictor for each response distribution parameter of the response
+        self.X_weighted_unscaled_sumK = {}  # Key order: <response>; Value: nbatch x time x nparam x ndim tensor of IRF-weighted values at each timepoint for each response distribution parameter of the response
+        self.X_weighted_unscaled_sumTK = {}  # Key order: <response>; Value: nbatch x nparam x ndim tensor of IRF-weighted values for each response distribution parameter of the response
+        self.X_weighted = {}  # Key order: <response>; Value: nbatch x ntime x ncoef x nparam x ndim tensor of IRF-weighted values at each timepoint of each predictor for each response distribution parameter of the response
+        self.X_weighted_sumT = {}  # Key order: <response>; Value: nbatch x ncoef x nparam x ndim tensor of IRF-weighted values of each predictor for each response distribution parameter of the response
+        self.X_weighted_sumK = {}  # Key order: <response>; Value: nbatch x ntime x nparam x ndim tensor of IRF-weighted values at each timepoint for each response distribution parameter of the response
+        self.X_weighted_sumTK = {}  # Key order: <response>; Value: nbatch x nparam x ndim tensor of IRF-weighted values for each response distribution parameter of the response
         self.layers = [] # List of NN layers
         self.kl_penalties = {} # Key order: <variable>; Value: scalar KL divergence
         self.ema_ops = [] # Container for any exponential moving average updates to run at each training step
@@ -1107,33 +1107,33 @@ class CDRModel(object):
         self.nn_transformed_impulse_X_mask = []
         self.nn_transformed_impulse_dirac_delta_mask = []
 
-        # Initialize predictive distribution metadata
+        # Initialize response distribution metadata
 
-        predictive_distribution = {}
-        predictive_distribution_map = {}
-        if self.predictive_distribution_map is not None:
-            _predictive_distribution_map = self.predictive_distribution_map.split()
-            if len(_predictive_distribution_map) == 1:
-                _predictive_distribution_map = _predictive_distribution_map * len(self.response_names)
-            has_delim = [';' in x for x in _predictive_distribution_map]
-            assert np.all(has_delim) or (not np.any(has_delim) and len(has_delim) == len(self.response_names)), 'predictive_distribution must contain a single distribution name, a one-to-one list of distribution names, one per response variable, or a list of ``;``-delimited pairs mapping <response, distribution>.'
-            for i, x in enumerate(_predictive_distribution_map):
+        response_distribution = {}
+        response_distribution_map = {}
+        if self.response_distribution_map is not None:
+            _response_distribution_map = self.response_distribution_map.split()
+            if len(_response_distribution_map) == 1:
+                _response_distribution_map = _response_distribution_map * len(self.response_names)
+            has_delim = [';' in x for x in _response_distribution_map]
+            assert np.all(has_delim) or (not np.any(has_delim) and len(has_delim) == len(self.response_names)), 'response_distribution must contain a single distribution name, a one-to-one list of distribution names, one per response variable, or a list of ``;``-delimited pairs mapping <response, distribution>.'
+            for i, x in enumerate(_response_distribution_map):
                 if has_delim[i]:
                     _response, _dist = x.split(';')
-                    predictive_distribution_map[_response] = _dist
+                    response_distribution_map[_response] = _dist
                 else:
-                    predictive_distribution_map[self.response_names[i]] = x
+                    response_distribution_map[self.response_names[i]] = x
 
         for _response in self.response_names:
-            if _response in predictive_distribution_map:
-                predictive_distribution[_response] = self.PREDICTIVE_DISTRIBUTIONS[predictive_distribution_map[_response]]
+            if _response in response_distribution_map:
+                response_distribution[_response] = self.RESPONSE_DISTRIBUTIONS[response_distribution_map[_response]]
             elif self.response_is_categorical[_response]:
-                predictive_distribution[_response] = self.PREDICTIVE_DISTRIBUTIONS['categorical']
+                response_distribution[_response] = self.RESPONSE_DISTRIBUTIONS['categorical']
             elif self.asymmetric_error:
-                predictive_distribution[_response] = self.PREDICTIVE_DISTRIBUTIONS['sinharcsinh']
+                response_distribution[_response] = self.RESPONSE_DISTRIBUTIONS['sinharcsinh']
             else:
-                predictive_distribution[_response] = self.PREDICTIVE_DISTRIBUTIONS['normal']
-        self.predictive_distribution_config = predictive_distribution
+                response_distribution[_response] = self.RESPONSE_DISTRIBUTIONS['normal']
+        self.response_distribution_config = response_distribution
 
         self.response_category_to_ix = self.response_category_maps
         self.response_ix_to_category = {}
@@ -1537,9 +1537,9 @@ class CDRModel(object):
                     nn_meta['n_units_rnn'] = [len(self.terminal_names) + len(self.ablated)]
 
             if nn_id is None:
-                nn_meta['pred_params'] = None
+                nn_meta['response_params'] = None
             else:
-                nn_meta['pred_params'] = self.nns_by_id[nn_id].pred_params
+                nn_meta['response_params'] = self.nns_by_id[nn_id].response_params
 
             if self.has_nn_irf and len(self.interaction_names) and self.get_nn_meta('input_dependent_irf', nn_id):
                 stderr('WARNING: Be careful about interaction terms in models with input-dependent neural net IRFs. Interactions can be implicit in such models (if one or more variables are present in both the input to the NN and the interaction), rendering explicit interaction terms uninterpretable.\n')
@@ -1658,7 +1658,12 @@ class CDRModel(object):
             self.Y_train_quantiles = {x: self.form.self.Y_train_quantiles[x] for x in response_names}
 
         for kwarg in CDRModel._INITIALIZATION_KWARGS:
-            setattr(self, kwarg.key, md.pop(kwarg.key, kwarg.default_value))
+            if kwarg.key == 'response_distribution_map' and 'predictive_distribution_map' in md:
+                setattr(self, kwarg.key, md.pop('predictive_distribution_map', kwarg.default_value))
+            elif kwarg.key == 'response_dist_epsilon' and 'pred_dist_epsilon' in md:
+                setattr(self, kwarg.key, md.pop('pred_dist_epsilon', kwarg.default_value))
+            else:
+                setattr(self, kwarg.key, md.pop(kwarg.key, kwarg.default_value))
 
     ######################################################
     #
@@ -2214,7 +2219,7 @@ class CDRModel(object):
                         else:
                             _out = np.zeros((1, ndim))
                     else:
-                        raise ValueError('Unrecognized predictive distributional parameter %s.' % param)
+                        raise ValueError('Unrecognized response distributional parameter %s.' % param)
 
                     out.append(_out)
 
@@ -2643,7 +2648,7 @@ class CDRModel(object):
                                             )
 
                             if not self.use_distributional_regression:
-                                # Pad out any unmodeled params of predictive distribution
+                                # Pad out any unmodeled params of response distribution
                                 intercept_random = tf.pad(
                                     intercept_random,
                                     # ranef   pred param    pred dim
@@ -2876,7 +2881,7 @@ class CDRModel(object):
         param_trainable = self.atomic_irf_param_trainable_by_family[family]
 
         if self.use_distributional_regression:
-            response_nparam = self.get_response_nparam(response) # number of params of predictive dist, not IRF
+            response_nparam = self.get_response_nparam(response) # number of params of response dist, not IRF
         else:
             response_nparam = 1
         response_ndim = self.get_response_ndim(response)
@@ -3032,7 +3037,7 @@ class CDRModel(object):
                             response_params = self.get_response_params(response)
                             if not self.use_distributional_regression:
                                 response_params = response_params[:1]
-                            nparam_response = len(response_params)  # number of params of predictive dist, not IRF
+                            nparam_response = len(response_params)  # number of params of response dist, not IRF
                             ndim = self.get_response_ndim(response)
                             irf_param_lb = self.irf_params_lb[family][irf_param_name]
                             if irf_param_lb is not None:
@@ -4870,7 +4875,7 @@ class CDRModel(object):
                 if len(impulse_names):
                     impulse_ix = names2ix(impulse_names, self.impulse_names)
                     parametric_irf_impulses = tf.gather(self.X_processed, impulse_ix, axis=2)
-                    parametric_irf_impulses = parametric_irf_impulses[..., None, None] # Pad out for predictive distribution param,dim
+                    parametric_irf_impulses = parametric_irf_impulses[..., None, None] # Pad out for response distribution param,dim
                     irf_impulses.append(parametric_irf_impulses)
                     terminal_names += parametric_terminal_names
 
@@ -4882,7 +4887,7 @@ class CDRModel(object):
                 if len(impulse_names):
                     impulse_ix = names2ix(impulse_names, nn_impulse_names)
                     parametric_irf_impulses = tf.gather(self.nn_transformed_impulses, impulse_ix, axis=2)
-                    parametric_irf_impulses = parametric_irf_impulses[..., None, None] # Pad out for predictive distribution param,dim
+                    parametric_irf_impulses = parametric_irf_impulses[..., None, None] # Pad out for response distribution param,dim
                     irf_impulses.append(parametric_irf_impulses)
                     terminal_names += parametric_terminal_names
 
@@ -4974,15 +4979,15 @@ class CDRModel(object):
                         if self.nn_irf_terminal_names[nn_id]:
                             if response in self.nn_irf:
                                 irf_seq = self.nn_irf[response][nn_id]
-                                pred_params = self.get_nn_meta('pred_params', nn_id)
-                                if pred_params:
+                                response_params = self.get_nn_meta('response_params', nn_id)
+                                if response_params:
                                     dist_name = self.get_response_dist_name(response)
-                                    if dist_name in pred_params:
-                                        pred_params = pred_params[dist_name]
+                                    if dist_name in response_params:
+                                        response_params = response_params[dist_name]
                                     else:
-                                        pred_params = pred_params[None]
+                                        response_params = response_params[None]
                                     all_param_names = self.get_response_params(response)
-                                    param_names = [x for x in all_param_names if x in pred_params]
+                                    param_names = [x for x in all_param_names if x in response_params]
                                     param_ix = names2ix(param_names, all_param_names)
                                     if len(param_names) < len(all_param_names):
                                         seq_shape = tf.shape(irf_seq)
@@ -5056,18 +5061,18 @@ class CDRModel(object):
                     self.X_weighted_sumK[response] = X_weighted_sumK
                     self.X_weighted_sumTK[response] = X_weighted_sumTK
 
-    def _initialize_predictive_distribution(self):
+    def _initialize_response_distribution(self):
         with self.session.as_default():
             with self.session.graph.as_default():
-                self.output_base = {}  # Key order: <response>; Value: nbatch x nparam x ndim tensor of baseline values at predictive distribution parameter of the response
-                self.output_delta = {}  # Key order: <response>; Value: nbatch x nparam x ndim tensor of stimulus-driven offsets at predictive distribution parameter of the response (summing over predictors and time)
-                self.output_delta_w_interactions = {}  # Key order: <response>; Value: nbatch x nparam x ndim tensor of stimulus-driven offsets (including interactions) at predictive distribution parameter of the response (summing over predictors and time)
-                self.interaction_delta = {}  # Key order: <response>; Value: nbatch x nparam x ndim tensor of interaction-driven offsets at predictive distribution parameter of the response (summing over predictors and time)
-                self.output = {}  # Key order: <response>; Value: nbatch x nparam x ndim tensor of predictoins at predictive distribution parameter of the response (summing over predictors and time)
-                self.predictive_distribution = {}
+                self.output_base = {}  # Key order: <response>; Value: nbatch x nparam x ndim tensor of baseline values at response distribution parameter of the response
+                self.output_delta = {}  # Key order: <response>; Value: nbatch x nparam x ndim tensor of stimulus-driven offsets at response distribution parameter of the response (summing over predictors and time)
+                self.output_delta_w_interactions = {}  # Key order: <response>; Value: nbatch x nparam x ndim tensor of stimulus-driven offsets (including interactions) at response distribution parameter of the response (summing over predictors and time)
+                self.interaction_delta = {}  # Key order: <response>; Value: nbatch x nparam x ndim tensor of interaction-driven offsets at response distribution parameter of the response (summing over predictors and time)
+                self.output = {}  # Key order: <response>; Value: nbatch x nparam x ndim tensor of predictoins at response distribution parameter of the response (summing over predictors and time)
+                self.response_distribution = {}
                 self.has_analytical_mean = {}
-                self.predictive_distribution_delta = {} # IRF-driven changes in each parameter of the predictive distribution
-                self.predictive_distribution_delta_w_interactions = {} # IRF-driven changes in each parameter of the predictive distribution
+                self.response_distribution_delta = {} # IRF-driven changes in each parameter of the response distribution
+                self.response_distribution_delta_w_interactions = {} # IRF-driven changes in each parameter of the response distribution
                 self.prediction = {}
                 self.prediction_over_time = {}
                 self.ll_by_var = {}
@@ -5084,10 +5089,9 @@ class CDRModel(object):
                 self.s_bijectors = {}
 
                 for i, response in enumerate(self.response_names):
-                    stderr('\r    Processing response %d/%d...' % (i + 1, self.n_response))
-                    self.predictive_distribution[response] = {}
-                    self.predictive_distribution_delta[response] = {}
-                    self.predictive_distribution_delta_w_interactions[response] = {}
+                    self.response_distribution[response] = {}
+                    self.response_distribution_delta[response] = {}
+                    self.response_distribution_delta_w_interactions[response] = {}
                     self.ll_by_var[response] = {}
                     self.error_distribution[response] = {}
                     self.error_distribution_theoretical_quantiles[response] = {}
@@ -5121,7 +5125,7 @@ class CDRModel(object):
                     
                     response_dist_kwargs = {}
                     if self.get_response_dist_name(response) == 'lognormalv2':
-                        response_dist_kwargs['epsilon'] = self.pred_dist_epsilon
+                        response_dist_kwargs['epsilon'] = self.response_dist_epsilon
 
                     # Base output deltas
                     X_weighted = self.X_weighted[response] # (batch, time, impulse, param, dim)
@@ -5202,36 +5206,36 @@ class CDRModel(object):
                         dim_names = self.expand_param_name(response, response_param_name)
                         for k, dim_name in enumerate(dim_names):
                             if self.use_distributional_regression or j == 0:
-                                self.predictive_distribution_delta[response][dim_name] = output_delta[:, 0, 0, j, k]
-                                self.predictive_distribution_delta_w_interactions[response][dim_name] = output_delta_w_interactions[:, 0, 0, j, k]
+                                self.response_distribution_delta[response][dim_name] = output_delta[:, 0, 0, j, k]
+                                self.response_distribution_delta_w_interactions[response][dim_name] = output_delta_w_interactions[:, 0, 0, j, k]
                             else:
-                                self.predictive_distribution_delta[response][dim_name] = tf.zeros_like(
+                                self.response_distribution_delta[response][dim_name] = tf.zeros_like(
                                     output_delta[:, 0, 0, 0, k]
                                 )
-                                self.predictive_distribution_delta_w_interactions[response][dim_name] = tf.zeros_like(
+                                self.response_distribution_delta_w_interactions[response][dim_name] = tf.zeros_like(
                                     output_delta_w_interactions[:, 0, 0, 0, k]
                                 )
 
-                    response_dist, response_dist_src, response_params = self._initialize_predictive_distribution_inner(
+                    response_dist, response_dist_src, response_params = self._initialize_response_distribution_inner(
                         response,
                         param_type='output'
                     )
                     pred_mean = response_dist.mean()
-                    self.predictive_distribution[response] = response_dist
+                    self.response_distribution[response] = response_dist
                     self.has_analytical_mean[response] = response_dist.has_analytical_mean()
                     if not self.is_categorical(response):
-                        base_response_dist, _, _ = self._initialize_predictive_distribution_inner(
+                        base_response_dist, _, _ = self._initialize_response_distribution_inner(
                             response,
                             param_type='output_base'
                         )
-                        base_pred_mean = base_response_dist.mean()
-                        delta_response_dist, _, _ = self._initialize_predictive_distribution_inner(
+                        base_response_mean = base_response_dist.mean()
+                        delta_response_dist, _, _ = self._initialize_response_distribution_inner(
                             response,
                             param_type='output_delta'
                         )
-                        delta_pred_mean = delta_response_dist.mean()
-                        self.predictive_distribution_delta[response]['mean'] = (delta_pred_mean - base_pred_mean)[:, 0, 0]
-                        self.predictive_distribution_delta_w_interactions[response]['mean'] = (pred_mean - base_pred_mean)[:, 0, 0]
+                        delta_response_mean = delta_response_dist.mean()
+                        self.response_distribution_delta[response]['mean'] = (delta_response_mean - base_response_mean)[:, 0, 0]
+                        self.response_distribution_delta_w_interactions[response]['mean'] = (pred_mean - base_response_mean)[:, 0, 0]
                         if self.get_response_dist_name(response).startswith('lognormal'):
                             bijector = self.s_bijectors[response]
                         else:
@@ -5302,7 +5306,7 @@ class CDRModel(object):
                     )
                     self.ll_by_var[response] = ll
 
-                    # Define EMA over predictive distribution
+                    # Define EMA over response distribution
                     beta = self.ema_decay
                     step = tf.cast(self.global_batch_step, self.FLOAT_TF)
                     response_params_ema_cur = []
@@ -5375,7 +5379,7 @@ class CDRModel(object):
                 self.ll = tf.add_n([self.ll_by_var[x] for x in self.ll_by_var])
                 stderr('\n')
 
-    def _initialize_predictive_distribution_inner(self, response, param_type='output'):
+    def _initialize_response_distribution_inner(self, response, param_type='output'):
         with self.session.as_default():
             with self.session.graph.as_default():
                 response_param_names = self.get_response_params(response)
@@ -5383,7 +5387,7 @@ class CDRModel(object):
                 ndim = self.get_response_ndim(response)
                 response_dist_kwargs = {}
                 if self.get_response_dist_name(response) == 'lognormalv2':
-                    response_dist_kwargs['epsilon'] = self.pred_dist_epsilon
+                    response_dist_kwargs['epsilon'] = self.response_dist_epsilon
 
                 if param_type == 'output_base':
                     response_params = self.output_base[response]
@@ -5405,10 +5409,10 @@ class CDRModel(object):
                     _response_param = response_params[j]
                     if self.is_real(response) and (response_param_name in ['sigma', 'tailweight', 'beta'] or
                             (response_param_name == 'mu' and self.get_response_dist_name(response) == 'lognormalv2')):
-                        _response_param = self.constraint_fn(_response_param) + self.pred_dist_epsilon
+                        _response_param = self.constraint_fn(_response_param) + self.response_dist_epsilon
                     response_params[j] = _response_param
 
-                # Define predictive distribution
+                # Define response distribution
                 # Squeeze params if needed
                 if ndim == 1:
                     _response_params = [tf.squeeze(x, axis=-1) for x in response_params]
@@ -6399,19 +6403,19 @@ class CDRModel(object):
 
         n = 0
         n_irf = len(self.nn_irf_output_names[nn_id])
-        pred_params = self.get_nn_meta('pred_params', nn_id)
+        response_params = self.get_nn_meta('response_params', nn_id)
         for response in self.response_names:
-            if pred_params:
+            if response_params:
                 dist_name = self.get_response_dist_name(response)
                 all_response_params = self.get_response_params(response)
-                if dist_name in pred_params:
-                    _pred_prams = pred_params[dist_name]
-                elif None in pred_params:
-                    _pred_params = pred_params[None]
+                if dist_name in response_params:
+                    _pred_prams = response_params[dist_name]
+                elif None in response_params:
+                    _response_params = response_params[None]
                 else:
-                    _pred_params = []
-                _pred_params = [x for x in all_response_params if x in _pred_params]
-                nparam = len(_pred_params)
+                    _response_params = []
+                _response_params = [x for x in all_response_params if x in _response_params]
+                nparam = len(_response_params)
             elif self.use_distributional_regression:
                 nparam = self.get_response_nparam(response)
             else:
@@ -6438,19 +6442,19 @@ class CDRModel(object):
                 shapes = {}
                 n = 0
                 n_irf = len(self.nn_irf_output_names[nn_id])
-                pred_params = self.get_nn_meta('pred_params', nn_id)
+                response_params = self.get_nn_meta('response_params', nn_id)
                 for response in self.response_names:
-                    if pred_params:
+                    if response_params:
                         dist_name = self.get_response_dist_name(response)
                         all_response_params = self.get_response_params(response)
-                        if dist_name in pred_params:
-                            _pred_prams = pred_params[dist_name]
-                        elif None in pred_params:
-                            _pred_params = pred_params[None]
+                        if dist_name in response_params:
+                            _pred_prams = response_params[dist_name]
+                        elif None in response_params:
+                            _response_params = response_params[None]
                         else:
-                            _pred_params = []
-                        _pred_params = [x for x in all_response_params if x in _pred_params]
-                        nparam = len(_pred_params)
+                            _response_params = []
+                        _response_params = [x for x in all_response_params if x in _response_params]
+                        nparam = len(_response_params)
                     elif self.use_distributional_regression:
                         nparam = self.get_response_nparam(response)
                     else:
@@ -6630,12 +6634,12 @@ class CDRModel(object):
                     stderr('_compile_X_weighted_by_irf took %.2fs\n' % dur)
 
                 if verbose:
-                    stderr('  Initializing predictive distribution...\n')
+                    stderr('  Initializing response distribution...\n')
                 t0 = pytime.time()
-                self._initialize_predictive_distribution()
+                self._initialize_response_distribution()
                 dur = pytime.time() - t0
                 if report_time:
-                    stderr('_initialize_predictive_distribution took %.2fs\n' % dur)
+                    stderr('_initialize_response_distribution took %.2fs\n' % dur)
 
                 if verbose:
                     stderr('  Initializing objective...\n')
@@ -6907,53 +6911,53 @@ class CDRModel(object):
 
     def get_response_dist(self, response):
         """
-        Get the TensorFlow distribution class for the predictive distribution assigned to a given response.
+        Get the TensorFlow distribution class for the response distribution assigned to a given response.
 
         :param response: ``str``; name of response
-        :return: TensorFlow distribution object; class of predictive distribution
+        :return: TensorFlow distribution object; class of response distribution
         """
 
-        return mcify(self.predictive_distribution_config[response]['dist'])
+        return mcify(self.response_distribution_config[response]['dist'])
 
     def get_response_dist_name(self, response):
         """
-        Get name of the predictive distribution assigned to a given response.
+        Get name of the response distribution assigned to a given response.
 
         :param response: ``str``; name of response
-        :return: ``str``; name of predictive distribution
+        :return: ``str``; name of response distribution
         """
 
-        return self.predictive_distribution_config[response]['name']
+        return self.response_distribution_config[response]['name']
 
     def get_response_params(self, response):
         """
-        Get tuple of names of parameters of the predictive distribution for a given response.
+        Get tuple of names of parameters of the response distribution for a given response.
 
         :param response: ``str``; name of response
-        :return: ``tuple`` of ``str``; parameters of predictive distribution
+        :return: ``tuple`` of ``str``; parameters of response distribution
         """
 
-        return self.predictive_distribution_config[response]['params']
+        return self.response_distribution_config[response]['params']
 
     def get_response_params_tf(self, response):
         """
-        Get tuple of TensorFlow-internal names of parameters of the predictive distribution for a given response.
+        Get tuple of TensorFlow-internal names of parameters of the response distribution for a given response.
 
         :param response: ``str``; name of response
-        :return: ``tuple`` of ``str``; parameters of predictive distribution
+        :return: ``tuple`` of ``str``; parameters of response distribution
         """
 
-        return self.predictive_distribution_config[response]['params_tf']
+        return self.response_distribution_config[response]['params_tf']
 
     def expand_param_name(self, response, response_param):
         """
-        Expand multivariate predictive distribution parameter names.
+        Expand multivariate response distribution parameter names.
         Returns an empty list if the param is not used by the response.
         Returns the unmodified param if the response is univariate.
         Returns the concatenation "<param_name>.<dim_name>" if the response is multivariate.
 
         :param response: ``str``; name of response variable
-        :param response_param: ``str``; name of predictive distribution parameter
+        :param response_param: ``str``; name of response distribution parameter
         :return:
         """
 
@@ -6971,20 +6975,20 @@ class CDRModel(object):
 
     def get_response_support(self, response):
         """
-        Get the name of the distributional support of the predictive distribution assigned to a given response
+        Get the name of the distributional support of the response distribution assigned to a given response
 
         :param response: ``str``; name of response
         :return: ``str``; label of distributional support
         """
 
-        return self.predictive_distribution_config[response]['support']
+        return self.response_distribution_config[response]['support']
 
     def get_response_nparam(self, response):
         """
-        Get the number of parameters in the predictive distrbution assigned to a given response
+        Get the number of parameters in the response distrbution assigned to a given response
 
         :param response: ``str``; name of response
-        :return: ``int``; number of parameters in the predictive distribution
+        :return: ``int``; number of parameters in the response distribution
         """
 
         return len(self.get_response_params(response))
@@ -7031,14 +7035,14 @@ class CDRModel(object):
 
     def has_param(self, response, param):
         """
-        Check whether a given parameter name is present in the predictive distrbution assigned to a given response
+        Check whether a given parameter name is present in the response distribution assigned to a given response
 
         :param response: ``str``; name of response
         :param param: ``str``; name of parameter to query
-        :return: ``bool``; whether the parameter is present in the predictive distribution
+        :return: ``bool``; whether the parameter is present in the response distribution
         """
 
-        return param in self.predictive_distribution_config[response]['params']
+        return param in self.response_distribution_config[response]['params']
 
     def has_rnn(self, nn_id):
         """
@@ -8168,7 +8172,7 @@ class CDRModel(object):
 
         :param feed_dict: ``dict``; A dictionary mapping string input names (e.g. ``'X'``, ``'X_time'``) to their values.
         :param responses: ``list`` of ``str``, ``str``, or ``None``; Name(s) response variable(s) to convolve toward. If ``None``, convolves toward all univariate responses. Multivariate convolution (e.g. of categorical responses) is supported but turned off by default to avoid excessive computation. When convolving toward a multivariate response, a set of convolved predictors will be generated for each dimension of the response.
-        :param response_param: ``list`` of ``str``, ``str``, or ``None``; Name(s) of parameter of predictive distribution(s) to convolve toward per response variable. Any param names not used by the predictive distribution for a given response will be ignored. If ``None``, convolves toward the first parameter of each response distribution.
+        :param response_param: ``list`` of ``str``, ``str``, or ``None``; Name(s) of parameter of response distribution(s) to convolve toward per response variable. Any param names not used by the response distribution for a given response will be ignored. If ``None``, convolves toward the first parameter of each response distribution.
         :param n_samples: ``int`` or ``None``; number of posterior samples to draw if Bayesian, ignored otherwise. If ``None``, use model defaults.
         :param algorithm: ``str``; Algorithm (``MAP`` or ``sampling``) to use for extracting predictions. Only relevant for variational Bayesian models. If ``MAP``, uses posterior means as point estimates for the parameters (no sampling). If ``sampling``, draws **n_samples** from the posterior.
         :param verbose: ``bool``; Send progress reports to standard error.
@@ -8816,7 +8820,7 @@ class CDRModel(object):
         :param X_in_Y_names: ``list`` of ``str``; names of predictors contained in **Y** rather than **X** (must be present in all elements of **Y**). If ``None``, no such predictors.
         :param n_samples: ``int`` or ``None``; number of posterior samples to draw if Bayesian, ignored otherwise. If ``None``, use model defaults.
         :param algorithm: ``str``; algorithm to use for extracting predictions, one of [``MAP``, ``sampling``].
-        :param return_preds: ``bool``; whether to return predictions as well as likelihoods. If ``None``, defaults are chosen based on predictive distribution(s).
+        :param return_preds: ``bool``; whether to return predictions as well as likelihoods. If ``None``, defaults are chosen based on response distribution(s).
         :param sum_outputs_along_T: ``bool``; whether to sum IRF-weighted predictors along the time dimension. Must be ``True`` for valid convolution. Setting to ``False`` is useful for timestep-specific evaluation.
         :param sum_outputs_along_K: ``bool``; whether to sum IRF-weighted predictors along the predictor dimension. Must be ``True`` for valid convolution. Setting to ``False`` is useful for impulse-specific evaluation.
         :param dump: ``bool``; whether to save generated data and evaluations to disk.
@@ -9054,7 +9058,7 @@ class CDRModel(object):
                         preds_outfile = self.outdir + '/output_%s.csv' % name_base
                         df.to_csv(preds_outfile, sep=' ', na_rep='NaN', index=False)
 
-                        if _response in self.predictive_distribution_config and \
+                        if _response in self.response_distribution_config and \
                                 self.is_real(_response) and resid_theoretical_q is not None:
                             plot_qq(
                                 resid_theoretical_q,
@@ -9169,7 +9173,7 @@ class CDRModel(object):
             Can be of type ``str`` or ``int``.
             Sort order and number of observations must be identical to that of ``y_time``.
         :param responses: ``list`` of ``str``, ``str``, or ``None``; Name(s) response variable(s) to convolve toward. If ``None``, convolves toward all univariate responses. Multivariate convolution (e.g. of categorical responses) is supported but turned off by default to avoid excessive computation. When convolving toward a multivariate response, a set of convolved predictors will be generated for each dimension of the response.
-        :param response_params: ``list`` of ``str``, ``str``, or ``None``; Name(s) of parameter of predictive distribution(s) to convolve toward per response variable. Any param names not used by the predictive distribution for a given response will be ignored. If ``None``, convolves toward the first parameter of each response distribution.
+        :param response_params: ``list`` of ``str``, ``str``, or ``None``; Name(s) of parameter of response distribution(s) to convolve toward per response variable. Any param names not used by the response distribution for a given response will be ignored. If ``None``, convolves toward the first parameter of each response distribution.
         :param X_in_Y_names: ``list`` of ``str``; names of predictors contained in **Y** rather than **X** (must be present in all elements of **Y**). If ``None``, no such predictors.
         :param X_in_Y: ``list`` of ``pandas`` ``DataFrame`` or ``None``; tables (one per response array) of predictors contained in **Y** rather than **X** (must be present in all elements of **Y**). If ``None``, inferred from **Y** and **X_in_Y_names**.
         :param n_samples: ``int`` or ``None``; number of posterior samples to draw if Bayesian, ignored otherwise. If ``None``, use model defaults.
@@ -9479,7 +9483,7 @@ class CDRModel(object):
         :param xvar: ``str``; Name of continuous variable for x-axis. Can be a predictor (impulse), ``'rate'``, ``'t_delta'``, or ``'X_time'``.
         :param yvar: ``str``; Name of continuous variable for y-axis in 3D plots. Can be a predictor (impulse), ``'rate'``, ``'t_delta'``, or ``'X_time'``. If ``None``, 2D plot.
         :param responses: ``list`` of ``str``, ``str``, or ``None``; Name(s) response variable(s) to plot.
-        :param response_params: ``list`` of ``str``, ``str``, or ``None``; Name(s) of parameter of predictive distribution(s) to plot per response variable. Any param names not used by the predictive distribution for a given response will be ignored.
+        :param response_params: ``list`` of ``str``, ``str``, or ``None``; Name(s) of parameter of response distribution(s) to plot per response variable. Any param names not used by the response distribution for a given response will be ignored.
         :param X_ref: ``dict`` or ``None``; Dictionary mapping impulse names to numeric values for use in constructing the reference. Any impulses not specified here will take default values.
         :param X_time_ref: ``float`` or ``None``; Timestamp to use for constructing the reference. If ``None``, use default value.
         :param t_delta_ref: ``float`` or ``None``; Delay/offset to use for constructing the reference. If ``None``, use default value.
@@ -9912,9 +9916,9 @@ class CDRModel(object):
 
             self.resample_model()
             if include_interactions:
-                delta = self.predictive_distribution_delta_w_interactions
+                delta = self.response_distribution_delta_w_interactions
             else:
-                delta = self.predictive_distribution_delta
+                delta = self.response_distribution_delta
             to_run = {}
             b = None
             for response in responses:
@@ -9927,7 +9931,7 @@ class CDRModel(object):
                         b = max(1, _b // N_MCIFIED_DIST_RESAMP)
                     if i == 0 and response_param == 'mean' and not self.has_analytical_mean[response]:
                         stderr(
-                            'WARNING: The predictive distribution for %s lacks an analytical mean, '
+                            'WARNING: The response distribution for %s lacks an analytical mean, '
                             'so the mean is bootstrapped, which is computationally '
                             'intensive.\n' % response
                         )
@@ -10080,7 +10084,7 @@ class CDRModel(object):
         Generate effect size estimates by computing the area under each IRF curve in the model via discrete approximation.
 
         :param responses: ``list`` of ``str``, ``str``, or ``None``; Name(s) response variable(s) to plot.
-        :param response_params: ``list`` of ``str``, ``str``, or ``None``; Name(s) of parameter of predictive distribution(s) to plot per response variable. Any param names not used by the predictive distribution for a given response will be ignored.
+        :param response_params: ``list`` of ``str``, ``str``, or ``None``; Name(s) of parameter of response distribution(s) to plot per response variable. Any param names not used by the response distribution for a given response will be ignored.
         :param level: ``float``; level of the credible interval if Bayesian, ignored otherwise.
         :param random: ``bool``; whether to compute IRF integrals for random effects estimates
         :param n_samples: ``int`` or ``None``; number of posterior samples to draw if Bayesian, ignored otherwise. If ``None``, use mean/MLE model.
@@ -10324,7 +10328,7 @@ class CDRModel(object):
         :param irf_name_map: ``dict`` or ``None``; a dictionary mapping IRF tree nodes to display names.
             If ``None``, IRF tree node string ID's will be used.
         :param responses: ``list`` of ``str``, ``str``, or ``None``; Name(s) response variable(s) to plot. If ``None``, plots all univariate responses. Multivariate plotting (e.g. of categorical responses) is supported but turned off by default to avoid excessive computation. When plotting a multivariate response, a set of plots will be generated for each dimension of the response.
-        :param response_params: ``list`` of ``str``, ``str``, or ``None``; Name(s) of parameter of predictive distribution(s) to plot per response variable. Any param names not used by the predictive distribution for a given response will be ignored. If ``None``, plots the first parameter of each response distribution.
+        :param response_params: ``list`` of ``str``, ``str``, or ``None``; Name(s) of parameter of response distribution(s) to plot per response variable. Any param names not used by the response distribution for a given response will be ignored. If ``None``, plots the first parameter of each response distribution.
         :param summed: ``bool``; whether to plot individual IRFs or their sum.
         :param pred_names: ``list`` or ``None``; list of names of predictors to include in plots. If ``None``, all predictors are plotted.
         :param sort_names: ``bool``; whether to alphabetically sort IRF names.
