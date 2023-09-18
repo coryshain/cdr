@@ -423,3 +423,30 @@ def flatten_dict(d, keys=None):
             out.append((tuple(keys + [k]), v))
     return out
 
+
+def pretty_print_time(s):
+    days, s = divmod(s, 24*60*60)
+    hours, s = divmod(s, 60*60)
+    minutes, s = divmod(s, 60)
+    seconds = s
+    vals = []
+    for i, val in enumerate((days, hours, minutes, seconds)):
+        if i == 0:
+            suffix = 'd'
+        elif i == 1:
+            suffix = 'h'
+        elif i == 2:
+            suffix = 'm'
+        else:
+            suffix = 's'
+        if len(vals):
+            vals.append(('%02d%s' % (val, suffix)))
+        elif val > 0:
+            vals.append('%d%s' % (val, suffix))
+
+    if len(vals):
+        out = '-'.join(vals)
+    else:
+        out = '0'
+    return out
+

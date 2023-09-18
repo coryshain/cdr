@@ -691,8 +691,6 @@ class CDRModel(object):
             Y_train_sds[_response_name] = _sd
             Y_train_quantiles[_response_name] = _quantiles
 
-        stderr('\n')
-
         self.Y_train_means = Y_train_means
         self.Y_train_sds = Y_train_sds
         self.Y_train_quantiles = Y_train_quantiles
@@ -1850,6 +1848,19 @@ class CDRModel(object):
                     name='global_batch_step'
                 )
                 self.incr_global_batch_step = tf.assign(self.global_batch_step, self.global_batch_step + 1)
+
+                self.training_wall_time = tf.Variable(
+                    0,
+                    trainable=False,
+                    dtype=self.FLOAT_TF,
+                    name='training_wall_time'
+                )
+                self.training_wall_time_in = tf.placeholder(
+                    self.FLOAT_TF,
+                    shape=[],
+                    name='training_wall_time_in'
+                )
+                self.set_training_wall_time_op = tf.assign_add(self.training_wall_time, self.training_wall_time_in)
 
                 self.training_complete = tf.Variable(
                     False,
@@ -5377,7 +5388,6 @@ class CDRModel(object):
                         self.error_distribution_plot_ub[response] = err_dist_ub
 
                 self.ll = tf.add_n([self.ll_by_var[x] for x in self.ll_by_var])
-                stderr('\n')
 
     def _initialize_response_distribution_inner(self, response, param_type='output'):
         with self.session.as_default():
@@ -6878,6 +6888,33 @@ class CDRModel(object):
 
             self.predict_mode = mode
 
+    def get_training_wall_time(self):
+        """
+        Returns current training wall time.
+        Typically run at the end of an iteration.
+        Value of ``time_to_add`` will be added to the current training wall time accumulator.
+
+        :return: ``float``; current training wall time
+        """
+
+        with self.session.as_default():
+            with self.session.graph.as_default():
+                return self.training_wall_time.eval(self.session)
+
+    def update_training_wall_time(self, time_to_add):
+        """
+        Update (increment) training wall time.
+        Typically run at the end of an iteration.
+        Value of ``time_to_add`` will be added to the current training wall time accumulator.
+
+        :param time_to_add: ``float``; amount of time (in seconds) to add to current wall time.
+        :return: ``None``
+        """
+
+        with self.session.as_default():
+            with self.session.graph.as_default():
+                self.session.run(self.set_training_wall_time_op, feed_dict={self.training_wall_time_in: time_to_add})
+
     def has_converged(self):
         """
         Check whether model has reached its automatic convergence criteria
@@ -7448,6 +7485,7 @@ class CDRModel(object):
             out += ' ' * (indent+2) + 'True variance:       %s\n' % np.squeeze(true_variance)
         if percent_variance_explained is not None:
             out += ' ' * (indent+2) + '%% var expl:          %.2f%%\n' % np.squeeze(percent_variance_explained)
+        out += ' ' * (indent+2) + 'Training wall time:  %.02fs\n' % self.get_training_wall_time()
         if ks_results is not None:
             out += ' ' * (indent+2) + 'Kolmogorov-Smirnov test of goodness of fit of modeled to true error:\n'
             out += ' ' * (indent+4) + 'D value: %s\n' % np.squeeze(ks_results[0])
@@ -7542,9 +7580,10 @@ class CDRModel(object):
         if self.check_convergence:
             n_iter = self.global_step.eval(session=self.session)
             min_p_ix, min_p, rt_at_min_p, ra_at_min_p, p_ta_at_min_p, proportion_converged, converged = self.run_convergence_check(verbose=False)
-            location = self.d0_names[min_p_ix]
+            training_wall_time = self.get_training_wall_time()
 
-            out += ' ' * (indent * 2) + 'Converged: %s\n' % converged
+            out += ' ' * (indent * 2) + 'Converged:                   %s\n' % converged
+            out += ' ' * (indent * 2) + 'Training wall time (s):      %.02f\n' % training_wall_time
             out += ' ' * (indent * 2) + 'Convergence n iterates:      %s\n' % self.convergence_n_iterates
             out += ' ' * (indent * 2) + 'Convergence stride:          %s\n' % self.convergence_stride
             out += ' ' * (indent * 2) + 'Convergence alpha:           %s\n' % self.convergence_alpha
@@ -7617,7 +7656,8 @@ class CDRModel(object):
 
         return pd.DataFrame(sample, columns=self.impulse_cov.columns)
 
-    def fit(self,
+    def fit(
+            self,
             X,
             Y,
             X_dev=None,
@@ -7626,7 +7666,7 @@ class CDRModel(object):
             n_iter=None,
             force_training_evaluation=True,
             optimize_memory=False
-            ):
+    ):
         """
         Fit the model.
 
@@ -7763,13 +7803,14 @@ class CDRModel(object):
                     n_failed = 0
                     failed = False
 
+                    t0_iter = pytime.time()
+
                     while not self.has_converged() and \
                             self.global_step.eval(session=self.session) < n_iter:
                         if failed:
                             stderr('Restarting from most recent checkpoint (restart #%d from this checkpoint).\n' % n_failed)
                             self.load() # Reload from previous save point
                         p, p_inv = get_random_permutation(n)
-                        t0_iter = pytime.time()
                         stderr('-' * 50 + '\n')
                         stderr('Iteration %d\n' % int(self.global_step.eval(session=self.session) + 1))
                         stderr('\n')
@@ -7955,12 +7996,16 @@ class CDRModel(object):
                                 self.global_step.eval(session=self.session) % self.plot_freq == 0:
                             self.make_plots(prefix='plt')
 
-                        t1_iter = pytime.time()
                         if self.check_convergence:
                             stderr('Convergence:    %.2f%%\n' %
                                    (100 * self.session.run(self.proportion_converged) /
                                     self.convergence_alpha))
-                        stderr('Iteration time: %.2fs\n' % (t1_iter - t0_iter))
+
+                        t1_iter = pytime.time()
+                        t_iter = t1_iter - t0_iter
+                        t0_iter = t1_iter
+                        self.update_training_wall_time(t_iter)
+                        stderr('Iteration time: %.2fs\n' % t_iter)
 
                     assert not failed, 'Training loop completed without passing stability checks. Model training has failed.'
 

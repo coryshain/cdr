@@ -3126,6 +3126,8 @@ class BatchNormLayer(object):
     ):
         assert axis != 0, 'Cannot target the batch dimension for normalization'
         self.session = get_session(session)
+        if decay is None or decay is True:
+            decay = 0.999
         self.decay = decay
         self.shift_activations = shift_activations
         self.rescale_activations = rescale_activations
@@ -3552,6 +3554,8 @@ class LayerNormLayer(object):
         assert axis != 0, 'Cannot target the batch dimension for normalization'
         self.session = get_session(session)
         self.training = training
+        if normalization_type is None or normalization_type is True:
+            normalization_type = 'z'
         self.normalization_type = normalization_type
         assert self.normalization_type in ['z', 'length'], 'Unrecognized normalization type: %s' % self.normalization_type
         self.shift_activations = shift_activations
@@ -3893,7 +3897,6 @@ class LayerNormLayerBayes(LayerNormLayer):
                 return self.kl_penalties_base.copy()
 
     def resample_ops(self):
-        out = super(LayerNormLayerBayes, self).resample_ops()
         out = super(LayerNormLayerBayes, self).resample_ops()
         if self.built:
             if self.shift_activations:
