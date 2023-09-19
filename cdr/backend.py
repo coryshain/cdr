@@ -4020,11 +4020,11 @@ class DropoutLayer(object):
 
                 if self.rescale:
                     def rescale(x=out, rate=self.rate):
-                        out = x * (1. / (1. - rate))
+                        out = x * (1. - rate)
                         return out
 
                     out = tf.cond(
-                        tf.logical_or(self.training, tf.logical_not(self.use_MAP_mode)),
+                        tf.logical_and(self.use_MAP_mode, tf.logical_not(self.training)),
                         rescale,
                         lambda: out
                     )
