@@ -464,21 +464,21 @@ MODEL_INITIALIZATION_KWARGS = [
     ),
     Kwarg(
         'lr_decay_rate',
-        0.,
+        1.,
         float,
         "coefficient by which to decay the learning rate every ``lr_decay_steps`` (ignored if ``lr_decay_family==None``).",
         aliases=['learning_rate_decay_rate']
     ),
     Kwarg(
         'lr_decay_steps',
-        25,
+        100,
         int,
         "Span of iterations over which to decay the learning rate by ``lr_decay_rate`` (ignored if ``lr_decay_family==None``).",
         aliases=['learning_rate_decay_steps']
     ),
     Kwarg(
         'lr_decay_iteration_power',
-        1,
+        0.5,
         float,
         "Power to which the iteration number ``t`` should be raised when computing the learning rate decay.",
         aliases=['learning_rate_decay_iteration_power']

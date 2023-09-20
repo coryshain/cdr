@@ -5494,9 +5494,9 @@ class CDRModel(object):
                     lr_decay_staircase = self.lr_decay_staircase
 
                     if self.lr_decay_iteration_power != 1:
-                        t = tf.cast(self.step, dtype=self.FLOAT_TF) ** self.lr_decay_iteration_power
+                        t = tf.cast(self.global_batch_step, dtype=self.FLOAT_TF) ** self.lr_decay_iteration_power
                     else:
-                        t = self.step
+                        t = self.global_batch_step
 
                     if self.lr_decay_family.lower() == 'linear_decay':
                         if lr_decay_staircase:
@@ -5506,14 +5506,14 @@ class CDRModel(object):
                         decay *= lr_decay_rate
                         self.lr = lr - decay
                     else:
-                        self.lr = getattr(tf.train, self.lr_decay_family)(
+                        schedule = getattr(tf.keras.optimizers.schedules, self.lr_decay_family)(
                             lr,
-                            t,
                             lr_decay_steps,
                             lr_decay_rate,
                             staircase=lr_decay_staircase,
                             name='learning_rate'
                         )
+                        self.lr = schedule(t)
                     if np.isfinite(self.learning_rate_min):
                         lr_min = tf.constant(self.learning_rate_min, dtype=self.FLOAT_TF)
                         INF_TF = tf.constant(np.inf, dtype=self.FLOAT_TF)
