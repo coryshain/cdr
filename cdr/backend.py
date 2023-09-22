@@ -1736,14 +1736,6 @@ class DenseLayer(object):
                 self.use_batch_normalization = bool(self.batch_normalization_decay)
 
                 self.layer_normalization_type = layer_normalization_type
-                if layer_normalization_type is None:
-                    self.layer_normalization_type = layer_normalization_type
-                elif layer_normalization_type.lower() == 'z':
-                    self.layer_normalization_type = 'z'
-                elif layer_normalization_type.lower() == 'length':
-                    self.layer_normalization_type = 'length'
-                else:
-                    raise ValueError('Unrecognized layer normalization type: %s' % layer_normalization_type)
                 self.use_layer_normalization = bool(self.layer_normalization_type)
 
                 assert not (self.use_batch_normalization and self.use_layer_normalization), 'Cannot batch normalize and layer normalize the same layer.'
@@ -1838,9 +1830,9 @@ class DenseLayer(object):
                         beta_use_ranef = self.biases_use_ranef
                         gamma_use_ranef = self.weights_use_ranef
 
-                        if self.use_batch_normalization:
-                            self.normalization_layer = BatchNormLayer(
-                                decay=self.batch_normalization_decay,
+                        if self.use_layer_normalization:
+                            self.normalization_layer = LayerNormLayer(
+                                normalization_type=self.layer_normalization_type,
                                 shift_activations=self.shift_normalized_activations,
                                 rescale_activations=self.rescale_normalized_activations,
                                 axis=-1,
@@ -1853,9 +1845,9 @@ class DenseLayer(object):
                                 reuse=self.reuse,
                                 name=self.name
                             )
-                        elif self.use_layer_normalization:
-                            self.normalization_layer = LayerNormLayer(
-                                normalization_type=self.layer_normalization_type,
+                        if self.use_batch_normalization:
+                            self.normalization_layer = BatchNormLayer(
+                                decay=self.batch_normalization_decay,
                                 shift_activations=self.shift_normalized_activations,
                                 rescale_activations=self.rescale_normalized_activations,
                                 axis=-1,
@@ -2151,6 +2143,30 @@ class DenseLayerBayes(DenseLayer):
                         beta_use_ranef = self.biases_use_ranef
                         gamma_use_ranef = self.weights_use_ranef
 
+                        if self.use_layer_normalization:
+                            self.normalization_layer = LayerNormLayerBayes(
+                                normalization_type=self.layer_normalization_type,
+                                shift_activations=self.shift_normalized_activations,
+                                rescale_activations=self.rescale_normalized_activations,
+                                axis=-1,
+                                training=self.training,
+                                rangf_map=norm_rangf_map,
+                                beta_use_ranef=beta_use_ranef,
+                                gamma_use_ranef=gamma_use_ranef,
+                                use_MAP_mode=self.use_MAP_mode,
+                                declare_priors_scale=self.declare_priors_gamma,
+                                declare_priors_shift=self.declare_priors_biases,
+                                scale_sd_prior=self.gamma_sd_prior,
+                                scale_sd_init=self.gamma_sd_init,
+                                shift_sd_prior=self.bias_sd_prior,
+                                shift_sd_init=self.bias_sd_init,
+                                posterior_to_prior_sd_ratio=self.posterior_to_prior_sd_ratio,
+                                constraint=self.constraint,
+                                epsilon=self.epsilon,
+                                session=self.session,
+                                reuse=self.reuse,
+                                name=self.name
+                            )
                         if self.use_batch_normalization:
                             self.normalization_layer = BatchNormLayerBayes(
                                 decay=self.batch_normalization_decay,
@@ -2170,30 +2186,6 @@ class DenseLayerBayes(DenseLayer):
                                 shift_sd_init=self.bias_sd_init,
                                 posterior_to_prior_sd_ratio=self.posterior_to_prior_sd_ratio,
                                 ranef_to_fixef_prior_sd_ratio=self.ranef_to_fixef_prior_sd_ratio,
-                                constraint=self.constraint,
-                                epsilon=self.epsilon,
-                                session=self.session,
-                                reuse=self.reuse,
-                                name=self.name
-                            )
-                        elif self.use_layer_normalization:
-                            self.normalization_layer = LayerNormLayerBayes(
-                                normalization_type=self.layer_normalization_type,
-                                shift_activations=self.shift_normalized_activations,
-                                rescale_activations=self.rescale_normalized_activations,
-                                axis=-1,
-                                training=self.training,
-                                rangf_map=norm_rangf_map,
-                                beta_use_ranef=beta_use_ranef,
-                                gamma_use_ranef=gamma_use_ranef,
-                                use_MAP_mode=self.use_MAP_mode,
-                                declare_priors_scale=self.declare_priors_gamma,
-                                declare_priors_shift=self.declare_priors_biases,
-                                scale_sd_prior=self.gamma_sd_prior,
-                                scale_sd_init=self.gamma_sd_init,
-                                shift_sd_prior=self.bias_sd_prior,
-                                shift_sd_init=self.bias_sd_init,
-                                posterior_to_prior_sd_ratio=self.posterior_to_prior_sd_ratio,
                                 constraint=self.constraint,
                                 epsilon=self.epsilon,
                                 session=self.session,
@@ -3126,7 +3118,7 @@ class BatchNormLayer(object):
     ):
         assert axis != 0, 'Cannot target the batch dimension for normalization'
         self.session = get_session(session)
-        if decay is None or decay is True:
+        if decay is None or decay is True or decay.lower() == 'true':
             decay = 0.999
         self.decay = decay
         self.shift_activations = shift_activations
@@ -3172,7 +3164,8 @@ class BatchNormLayer(object):
                 if i in self.reduction_axes:
                     shape.append(1)
                 else:
-                    shape.append(int(inputs_shape[i]))
+                    dim_shape = int(inputs_shape[i])
+                    shape.append(dim_shape)
 
             if not self.name:
                 name = ''
@@ -3386,7 +3379,8 @@ class BatchNormLayerBayes(BatchNormLayer):
                 if i in self.reduction_axes:
                     shape.append(1)
                 else:
-                    shape.append(inputs_shape[i])
+                    dim_shape = int(inputs_shape[i])
+                    shape.append(dim_shape)
             shape = tf.convert_to_tensor(shape)
 
             if not self.name:
@@ -3554,8 +3548,16 @@ class LayerNormLayer(object):
         assert axis != 0, 'Cannot target the batch dimension for normalization'
         self.session = get_session(session)
         self.training = training
-        if normalization_type is None or normalization_type is True:
+
+        if normalization_type is None or \
+                normalization_type is True or \
+                normalization_type.lower() == 'true' or \
+                normalization_type.lower() == 'z':
             normalization_type = 'z'
+        elif normalization_type.lower() == 'length':
+            normalization_type = 'length'
+        else:
+            raise ValueError('Unrecognized layer normalization type: %s' % normalization_type)
         self.normalization_type = normalization_type
         assert self.normalization_type in ['z', 'length'], 'Unrecognized normalization type: %s' % self.normalization_type
         self.shift_activations = shift_activations
@@ -3600,7 +3602,11 @@ class LayerNormLayer(object):
             shape = []
             for i in range(len(inputs_shape)):
                 if i in self.reduction_axes:
-                    shape.append(int(inputs_shape[i]))
+                    dim_shape = int(inputs_shape[i])
+                    assert dim_shape > 1, \
+                        'Normalization is ill-defined for dimensions of size <= 1. Got size %d for dimension %s.' \
+                        % (dim_shape, i)
+                    shape.append(dim_shape)
                 else:
                     shape.append(1)
 
@@ -3777,7 +3783,11 @@ class LayerNormLayerBayes(LayerNormLayer):
             shape = []
             for i in range(len(inputs_shape)):
                 if i in self.reduction_axes:
-                    shape.append(int(inputs_shape[i]))
+                    dim_shape = int(inputs_shape[i])
+                    assert dim_shape > 1, \
+                        'Normalization is ill-defined for dimensions of size <= 1. Got size %d for dimension %s.' \
+                        % (dim_shape, i)
+                    shape.append(dim_shape)
                 else:
                     shape.append(1)
             # shape = tf.convert_to_tensor(shape)
