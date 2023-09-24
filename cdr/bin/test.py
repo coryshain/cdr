@@ -49,8 +49,7 @@ if __name__ == '__main__':
         metric = 'loglik'
     assert metric in ['mse', 'loglik', 'corr'], 'Metric must be one of ["mse", "loglik", "corr"].'
 
-    if args.pool:
-        exps_outdirs = []
+    exps_outdirs = []
 
     ablation_components = args.ablation_components
 

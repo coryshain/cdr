@@ -92,7 +92,7 @@ if __name__ == '__main__':
     ''')
     argparser.add_argument('config_paths', nargs='+', help='Path(s) to config files defining models to compare.')
     argparser.add_argument('-r', '--response', default=None, help='Name of response to evaluate.')
-    argparser.add_argument('-m', '--metric', default='loglik', help='Metric to report. One of ``["err", "loglik", "pve", "iter"]``.')
+    argparser.add_argument('-m', '--metric', default='loglik', help='Metric to report. One of ``["err", "loglik", "pve", "iter", "time"]``.')
     argparser.add_argument('-t', '--task_names', nargs='+', default=None, help='Task names to use (should be in 1-1 alignment with ``config_paths``). If not provided, names will be inferred from config paths.')
     argparser.add_argument('-b', '--baselines',  nargs='+', default=None, help='Models to treat as baselines.')
     argparser.add_argument('-B', '--baseline_names',  nargs='+', default=None, help='Names of baselines (should be in 1-1 alignment with ``baselines``. If not provided, names will be inferred from baselines.')
@@ -113,6 +113,8 @@ if __name__ == '__main__':
         metric = '% var expl'
     elif args.metric.lower() in ['n', 'iter', 'niter', 'n_iter']:
         metric = 'Training iterations completed'
+    elif args.metric.lower() in ['t', 'time', 'walltime', 'wall_time']:
+        metric = 'Training wall time'
     else:
         raise ValueError('Unrecognized metric: %s.' % args.metric)
 
@@ -196,7 +198,7 @@ if __name__ == '__main__':
                                     line = f.readline()
                                     while line:
                                         if line.strip().startswith(metric):
-                                            val = float(line.strip().split()[-1].replace('%', ''))
+                                            val = float(line.strip().split()[-1].replace('%', '').replace('s', ''))
                                             if _task_name not in results:
                                                 results[_task_name] = {}
                                             if _system_names[j] not in results[_task_name]:
