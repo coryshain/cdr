@@ -781,13 +781,20 @@ class Formula(object):
             if t.func.id == 'C':
                 # IRF Call
                 # Arg 1: Inputs
-                # Arg 2: IRF kernel definition
+                # Arg 2: IRF kernel definition (optional, defaults to `NN()`)
 
                 assert not under_irf, 'IRF calls cannot be nested in the inputs to another IRF call. To compose IRFs, apply nesting in the impulse response function definition (second argument of IFR call).'
-                assert len(t.args) == 2, 'C() takes exactly two arguments in CDR formula strings'
+                assert 1 <= len(t.args) <= 2, 'C() takes either one or two arguments in CDR formula strings'
+
+                arg0 = t.args[0]
+                if len(t.args) == 1:  # No IRF family specified, use NN as default
+                    arg1 = ast.parse('NN()').body[0].value
+                else:
+                    arg1 = t.args[1]
+
                 subterms = []
                 self.process_ast(
-                    t.args[0],
+                    arg0,
                     terms=subterms,
                     has_intercept=has_intercept,
                     rangf=rangf,
@@ -801,7 +808,7 @@ class Formula(object):
                 for S in subterms:
                     for s in S:
                         new = self.process_irf(
-                            t.args[1],
+                            arg1,
                             input_irf=s,
                             ops=None,
                             rangf=rangf,
@@ -1058,7 +1065,7 @@ class Formula(object):
         assert t.func.id in Formula.IRF_PARAMS.keys() or Formula.is_LCG(t.func.id) is not None, 'Ill-formed model string: process_irf() called on non-IRF node'
         irf_id = None
         coef_id = None
-        ranirf = False
+        ranirf = True
         trainable = None
         response_params = None
         param_init={}
