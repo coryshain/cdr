@@ -295,7 +295,7 @@ MODEL_INITIALIZATION_KWARGS = [
         'response_distribution_map',
         None,
         [str, None],
-        "Definition of response distribution. Can be a single distribution name (shared across all response variables), a space-delimited list of distribution names (one per response variable), a space-delimited list of ';'-delimited tuples matching response variables to distribution names (e.g. ``response;Bernoulli``), or ``None``, in which case the response distribution will be inferred as ``Normal`` for continuous variables and ``Categorical`` for categorical variables.",
+        "Definition of response distribution. Can be a single distribution name (shared across all response variables), a space-delimited list of distribution names (one per response variable), a space-delimited list of ';'-delimited tuples matching response variables to distribution names (e.g. ``response;Bernoulli``), or ``None``, in which case the response distribution will be inferred as ``JohnsonSU`` for continuous variables and ``Categorical`` for categorical variables.",
         aliases=['response_distribution', 'predictive_distribution_map', 'predictive_distribution', 'pred_dist']
     ),
     Kwarg(
@@ -332,12 +332,6 @@ MODEL_INITIALIZATION_KWARGS = [
     ),
 
     # MODEL DEFINITION
-    Kwarg(
-        'asymmetric_error',
-        False,
-        bool,
-        "Whether to model numeric responses by default with an (asymmetric) SinhArcshin transform of the Normal distribution. Otherwise, defaults to a Normal distribution. Only affects response variables whose distributions have not been explicitly specified using **response_distribution_map**."
-    ),
     Kwarg(
         'constraint',
         'softplus',

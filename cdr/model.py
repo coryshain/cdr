@@ -1127,10 +1127,8 @@ class CDRModel(object):
                 response_distribution[_response] = self.RESPONSE_DISTRIBUTIONS[response_distribution_map[_response]]
             elif self.response_is_categorical[_response]:
                 response_distribution[_response] = self.RESPONSE_DISTRIBUTIONS['categorical']
-            elif self.asymmetric_error:
-                response_distribution[_response] = self.RESPONSE_DISTRIBUTIONS['sinharcsinh']
             else:
-                response_distribution[_response] = self.RESPONSE_DISTRIBUTIONS['normal']
+                response_distribution[_response] = self.RESPONSE_DISTRIBUTIONS['johnsonsu']
         self.response_distribution_config = response_distribution
 
         self.response_category_to_ix = self.response_category_maps
@@ -7495,10 +7493,6 @@ class CDRModel(object):
                 out += ' ' * (indent+4) + 'NOTE: KS tests will likely reject on large datasets.\n'
                 out += ' ' * (indent+4) + 'This does not entail that the model is fatally flawed.\n'
                 out += ' ' * (indent+4) + "Check the Q-Q plot in the model's output directory.\n"
-                if not self.asymmetric_error:
-                    out += ' ' * (indent+4) + 'Poor error fit can usually be improved without transforming\n'
-                    out += ' ' * (indent+4) + 'the response by optimizing using ``asymmetric_error=True``.\n'
-                    out += ' ' * (indent+4) + 'Consult the documentation for details.\n'
 
         out += '\n'
 
