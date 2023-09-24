@@ -306,7 +306,7 @@ MODEL_INITIALIZATION_KWARGS = [
     ),
     Kwarg(
         'rescale_inputs',
-        False,
+        True,
         bool,
         "Rescale input features by dividing by training set standard deviation. Can improve convergence speed and reduce vulnerability to local optima. Only affects fitting -- prediction, likelihood computation, and plotting are reported on the source values.",
         aliases=['scale_inputs'],
@@ -432,7 +432,7 @@ MODEL_INITIALIZATION_KWARGS = [
     ),
     Kwarg(
         'response_dist_epsilon',
-        1e-2,
+        1e-5,
         float,
         "Epsilon parameter to use for numerical stability in bounded parameters of the response distribution (imposes a positive lower bound on the parameter).",
         aliases=['pred_dist_epsilon', 'epsilon']
@@ -447,7 +447,8 @@ MODEL_INITIALIZATION_KWARGS = [
         'learning_rate',
         0.001,
         float,
-        "Initial value for the learning rate."
+        "Initial value for the learning rate.",
+        default_value_cdrnn=0.01
     ),
     Kwarg(
         'learning_rate_min',
@@ -516,7 +517,7 @@ MODEL_INITIALIZATION_KWARGS = [
         500,
         [int, None],
         "Number of timesteps over which to average parameter movements for convergence diagnostics. If ``None`` or ``0``, convergence will not be programmatically checked (reduces memory overhead, but convergence must then be visually diagnosed).",
-        default_value_cdrnn=250
+        default_value_cdrnn=100
     ),
     Kwarg(
         'convergence_stride',
@@ -532,7 +533,7 @@ MODEL_INITIALIZATION_KWARGS = [
     ),
     Kwarg(
         'early_stopping',
-        False,
+        True,
         bool,
         "Whether to diagnose convergence based on dev set performance (``True``) or training set performance (``False``)."
     ),
@@ -598,7 +599,7 @@ MODEL_INITIALIZATION_KWARGS = [
         'inherit',
         [str, float, 'inherit'],
         "Scale of random effects regularizer (ignored if ``regularizer_name==None``). If ``'inherit'``, inherits **regularizer_scale**. Regularization only applies to random effects without variational priors.",
-        default_value_cdrnn=10.
+        default_value_cdrnn=100.
     ),
     Kwarg(
         'regularize_mean',
@@ -616,13 +617,13 @@ MODEL_INITIALIZATION_KWARGS = [
     ),
     Kwarg(
         'plot_freq',
-        100,
+        10,
         int,
         "Frequency (in iterations) with which to plot model estimates (or ``0`` to turn off incremental plotting)."
     ),
     Kwarg(
         'eval_freq',
-        0,
+        10,
         int,
         "Frequency (in iterations) with which to evaluate on dev data (or ``0`` to turn off incremental evaluation)."
     ),
@@ -679,7 +680,7 @@ MODEL_INITIALIZATION_KWARGS = [
     ),
     Kwarg(
         'plot_step_default',
-        1.,
+        'sd',
         [str, float],
         "Default size of step to take above reference in univariate IRF plots, if not specified in **plot_step**. Either a float or the string ``'sd'``, which indicates training sample standard deviation."
     ),
@@ -736,7 +737,7 @@ MODEL_INITIALIZATION_KWARGS = [
     ),
     Kwarg(
         'generate_curvature_plots',
-        False,
+        True,
         bool,
         "Whether to plot IRF curvature at time **reference_time**."
     ),
@@ -933,7 +934,7 @@ NN_KWARGS = [
     ),
     Kwarg(
         'rescale_X_time',
-        False,
+        True,
         bool,
         "Whether to rescale time values as inputs by their training SD under the hood. Times are automatically reconverted back to the source scale for plotting and model criticism.",
         aliases=['rescale_time', 'rescale_time_X'],
@@ -976,7 +977,7 @@ NN_KWARGS = [
     ),
     Kwarg(
         'n_units_ff',
-        32,
+        128,
         [int, str, None],
         "Number of units per feedforward encoder hidden layer. Can be an ``int``, which will be used for all layers, or a ``str`` with **n_layers_rnn** space-delimited integers, one for each layer in order from bottom to top. If ``0`` or ``None``, no feedforward encoder.",
         aliases=['n_units', 'n_units_encoder', 'n_units_input_projection']
@@ -1014,7 +1015,7 @@ NN_KWARGS = [
     ),
     Kwarg(
         'n_units_irf',
-        32,
+        128,
         [int, str, None],
         "Number of units per hidden layer in IRF. Can be an ``int``, which will be used for all layers, or a ``str`` with **n_units_irf** space-delimited integers, one for each layer in order from bottom to top. If ``0`` or ``None``, no hidden layers.",
         aliases=['n_units', 'n_units_decoder']
@@ -1129,7 +1130,7 @@ NN_KWARGS = [
     ),
     Kwarg(
         'layer_normalization_type',
-        None,
+        'z',
         [bool, str, None],
         "Type of layer normalization, one of ``['z', 'length', None]``. If ``'z'``, classical z-transform-based normalization. If ``'length'``, normalize by the norm of the activation vector. If ``True``, uses ``'z'``. If ``False`` or ``None``, no layer normalization.",
         aliases=['layer_normalization', 'layer_norm']
@@ -1149,20 +1150,20 @@ NN_KWARGS = [
     ),
     Kwarg(
         'normalize_after_activation',
-        True,
+        False,
         bool,
         "Whether to apply normalization (if applicable) after the non-linearity (otherwise, applied before).",
     ),
     Kwarg(
         'shift_normalized_activations',
-        False,
+        True,
         bool,
         "Whether to use trainable shift in batch/layer normalization layers.",
         aliases=['normalization_use_beta', 'batch_normalization_use_beta', 'layer_normalization_use_beta']
     ),
     Kwarg(
         'rescale_normalized_activations',
-        False,
+        True,
         bool,
         "Whether to use trainable scale in batch/layer normalization layers.",
         aliases=['normalization_use_gamma', 'batch_normalization_use_gamma', 'layer_normalization_use_gamma']
@@ -1183,13 +1184,13 @@ NN_KWARGS = [
     # REGULARIZATION
     Kwarg(
         'nn_regularizer_name',
-        'l2_regularizer',
+        None,
         [str, 'inherit', None],
         "Name of weight regularizer (e.g. ``l1_regularizer``, ``l2_regularizer``); overrides **regularizer_name**. If ``'inherit'``, inherits **regularizer_name**. If ``None``, no regularization."
     ),
     Kwarg(
         'nn_regularizer_scale',
-        5.,
+        1.,
         [str, float, 'inherit'],
         "Scale of weight regularizer (ignored if ``regularizer_name==None``). If ``'inherit'``, inherits **regularizer_scale**."
     ),
@@ -1271,7 +1272,7 @@ NN_KWARGS = [
     ),
     Kwarg(
         'ff_dropout_rate',
-        0.1,
+        0.5,
         [float, None],
         "Rate at which to drop neurons of FF projection.",
         aliases=['dropout', 'dropout_rate', 'input_projection_dropout_rate', 'h_in_dropout_rate']
@@ -1290,28 +1291,28 @@ NN_KWARGS = [
     ),
     Kwarg(
         'h_rnn_dropout_rate',
-        0.1,
+        0.5,
         [float, None],
         "Rate at which to drop neurons of h_rnn.",
         aliases=['dropout', 'dropout_rate']
     ),
     Kwarg(
         'rnn_dropout_rate',
-        0.1,
+        0.5,
         [float, None],
         "Rate at which to entirely drop the RNN.",
         aliases=['dropout', 'dropout_rate']
     ),
     Kwarg(
         'irf_dropout_rate',
-        0.1,
+        0.5,
         [float, None],
         "Rate at which to drop neurons of IRF layers.",
         aliases=['dropout', 'dropout_rate']
     ),
     Kwarg(
         'ranef_dropout_rate',
-        0.1,
+        None,
         [float, None],
         "Rate at which to drop random effects indicators.",
         aliases=['dropout', 'dropout_rate']
