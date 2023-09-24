@@ -1123,8 +1123,16 @@ NN_KWARGS = [
     Kwarg(
         'batch_normalization_decay',
         None,
-        [float, None],
-        "Decay rate to use for batch normalization in internal layers. If ``None``, no batch normalization.",
+        [bool, float, None],
+        "Decay rate to use for batch normalization in internal layers. If ``True``, uses decay ``0.999``. If ``False`` or ``None``, no batch normalization.",
+        aliases=['batch_normalization', 'batch_norm']
+    ),
+    Kwarg(
+        'layer_normalization_type',
+        None,
+        [bool, str, None],
+        "Type of layer normalization, one of ``['z', 'length', None]``. If ``'z'``, classical z-transform-based normalization. If ``'length'``, normalize by the norm of the activation vector. If ``True``, uses ``'z'``. If ``False`` or ``None``, no layer normalization.",
+        aliases=['layer_normalization', 'layer_norm']
     ),
     Kwarg(
         'normalize_ff',
@@ -1170,12 +1178,6 @@ NN_KWARGS = [
         False,
         bool,
         "Whether to apply normalization (if applicable) to the final layer.",
-    ),
-    Kwarg(
-        'layer_normalization_type',
-        None,
-        [str, None],
-        "Type of layer normalization, one of ``['z', 'length', None]``. If ``'z'``, classical z-transform-based normalization. If ``'length'``, normalize by the norm of the activation vector. If ``None``, no layer normalization. Incompatible with batch normalization.",
     ),
 
     # REGULARIZATION
