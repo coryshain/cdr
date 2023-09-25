@@ -1373,7 +1373,7 @@ class CDRModel(object):
                     self.d0_assign = []
 
                     convergence_stride = self.convergence_stride
-                    if self.early_stopping:
+                    if self.early_stopping and self.eval_freq > 0:
                         convergence_stride *= self.eval_freq
 
                     self.convergence_history = tf.Variable(
@@ -6044,7 +6044,7 @@ class CDRModel(object):
 
                     # Initialize tracker of parameter iterates
                     convergence_stride = self.convergence_stride
-                    if self.early_stopping:
+                    if self.early_stopping and self.eval_freq > 0:
                         convergence_stride *= self.eval_freq
 
                     var_d0_iterates = tf.Variable(
@@ -6060,7 +6060,7 @@ class CDRModel(object):
 
     def _compute_and_test_corr(self, iterates, twotailed=True):
         convergence_stride = self.convergence_stride
-        if self.early_stopping:
+        if self.early_stopping and self.eval_freq > 0:
             convergence_stride *= self.eval_freq
 
         x = np.arange(0, len(iterates)*convergence_stride, convergence_stride).astype('float')[..., None]
@@ -6100,7 +6100,7 @@ class CDRModel(object):
                     cur_step = self.global_step.eval(session=self.session)
                     last_check = self.last_convergence_check.eval(session=self.session)
                     convergence_stride = self.convergence_stride
-                    if self.early_stopping:
+                    if self.early_stopping and self.eval_freq > 0:
                         convergence_stride *= self.eval_freq
                     offset = cur_step % convergence_stride
                     update = last_check < cur_step and convergence_stride > 0
@@ -6120,7 +6120,7 @@ class CDRModel(object):
                         start_ix = int(self.convergence_n_iterates / convergence_stride) - int((cur_step - 1) / convergence_stride) - 1
                         start_ix = max(0, start_ix)
                         
-                        twotailed = not self.early_stopping
+                        twotailed = not (self.early_stopping and self.eval_freq > 0)
 
                         for i in range(len(var_d0_iterates)):
                             if update:
@@ -6780,7 +6780,7 @@ class CDRModel(object):
                 if restore and os.path.exists(outdir + '/checkpoint'):
                     # Thanks to Ralph Mao (https://github.com/RalphMao) for this workaround for missing vars
                     path = outdir + '/model%s.ckpt' % suffix
-                    if self.early_stopping and \
+                    if (self.early_stopping and self.eval_freq > 0) and \
                             (self.has_converged() or
                              self.global_step.eval(session=self.session) >= self.n_iter):
                         pred_path = outdir + '/model%s_maxval.ckpt' % suffix
@@ -7704,7 +7704,7 @@ class CDRModel(object):
         :param optimize_memory: ``bool``; Compute expanded impulse arrays on the fly rather than pre-computing. Can reduce memory consumption by orders of magnitude but adds computational overhead at each minibatch, slowing training (typically around 1.5-2x the unoptimized training time).
         """
 
-        if self.early_stopping:
+        if self.early_stopping and self.eval_freq > 0:
             assert X_dev is not None, 'X_dev must be specified if early stopping is used'
             assert Y_dev is not None, 'Y_dev must be specified if early stopping is used'
 
@@ -7944,7 +7944,7 @@ class CDRModel(object):
                             dev_ll = None
 
                         if self.check_convergence:
-                            if self.early_stopping:
+                            if self.early_stopping and self.eval_freq > 0:
                                 if dev_ll is not None:
                                     fd = {self.loss_total: -dev_ll}
                                     self.run_convergence_check(verbose=False, feed_dict=fd)
@@ -7982,6 +7982,12 @@ class CDRModel(object):
                                 )
                             self.writer.flush()
 
+                        t1_iter = pytime.time()
+                        t_iter = t1_iter - t0_iter
+                        t0_iter = t1_iter
+                        self.update_training_wall_time(t_iter)
+                        stderr('Iteration time: %.2fs\n' % t_iter)
+
                         if self.save_freq > 0 and \
                                 self.global_step.eval(session=self.session) % self.save_freq == 0:
                             n_failed = 0
@@ -7995,11 +8001,6 @@ class CDRModel(object):
                                    (100 * self.session.run(self.proportion_converged) /
                                     self.convergence_alpha))
 
-                        t1_iter = pytime.time()
-                        t_iter = t1_iter - t0_iter
-                        t0_iter = t1_iter
-                        self.update_training_wall_time(t_iter)
-                        stderr('Iteration time: %.2fs\n' % t_iter)
 
                     assert not failed, 'Training loop completed without passing stability checks. Model training has failed.'
 

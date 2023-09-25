@@ -50,14 +50,23 @@ class Config(object):
         # Data #
         ########
 
-        self.X_train = data.get('X_train')
+        self.X_train = data.get('X_train').split()
         self.X_dev = data.get('X_dev', None)
+        if self.X_dev:
+            self.X_dev = self.X_dev.split()
         self.X_test = data.get('X_test', None)
+        if self.X_test:
+            self.X_test = self.X_test.split()
 
         self.Y_train = data.get('Y_train', data.get('y_train', None))
         assert self.Y_train, 'Y_train must be provided'
+        self.Y_train = self.Y_train.split()
         self.Y_dev = data.get('Y_dev', data.get('y_dev', None))
+        if self.Y_dev:
+            self.Y_dev = self.Y_dev.split()
         self.Y_test = data.get('Y_test', data.get('y_test', None))
+        if self.Y_test:
+            self.Y_test = self.Y_test.split()
 
         sep = data.get('sep', ',')
         if sep.lower() in ['', "' '", '" "', 's', 'space']:

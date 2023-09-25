@@ -336,13 +336,18 @@ def paths_from_partition_cliarg(partition, config):
     }
 
     for p in partition:
-        X_path = X_map[p]
-        y_path = Y_map[p]
+        _X_paths = X_map[p]
+        _y_paths = Y_map[p]
 
-        if X_path not in X_paths:
-            X_paths.append(X_path)
-        if y_path not in y_paths:
-            y_paths.append(y_path)
+        assert _X_paths is not None, 'No data path provided for partition %s. Exiting.' % p
+        assert _y_paths is not None, 'No data path provided for partition %s. Exiting.' % p
+
+        for _X_path in _X_paths:
+            if _X_path not in X_paths:
+                X_paths.append(_X_path)
+        for _y_path in _y_paths:
+            if _y_path not in y_paths:
+                y_paths.append(_y_path)
 
     return X_paths, y_paths
 
