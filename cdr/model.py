@@ -7088,7 +7088,7 @@ class CDRModel(object):
         """
 
         has_rnn = nn_id in self.nn_impulse_ids or self.get_nn_meta('input_dependent_irf', nn_id)
-        has_rnn &= self.get_nn_meta('n_layers_rnn', nn_id)
+        has_rnn &= bool(self.get_nn_meta('n_layers_rnn', nn_id))
 
         return has_rnn
 
@@ -7101,7 +7101,7 @@ class CDRModel(object):
         """
 
         has_ff = nn_id in self.nn_impulse_ids
-        has_ff &= self.get_nn_meta('n_layers_ff', nn_id) or not self.has_rnn(nn_id)
+        has_ff &= bool(self.get_nn_meta('n_layers_ff', nn_id)) or not self.has_rnn(nn_id)
 
         return has_ff
 
