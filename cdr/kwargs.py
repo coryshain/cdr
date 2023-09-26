@@ -697,6 +697,12 @@ MODEL_INITIALIZATION_KWARGS = [
         "Resolution of plot axis (for 3D plots, uses sqrt of this number for each axis)."
     ),
     Kwarg(
+        'plot_dirac',
+        False,
+        bool,
+        "Whether to include any Dirac delta IRF's (stick functions at t=0) in plot."
+    ),
+    Kwarg(
         'plot_x_inches',
         6.,
         float,

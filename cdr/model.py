@@ -10376,7 +10376,7 @@ class CDRModel(object):
         :param plot_composite: ``bool``; plot any composite IRFs. If ``False``, only plots terminal IRFs.
         :param prop_cycle_length: ``int`` or ``None``; Length of plotting properties cycle (defines step size in the color map). If ``None``, inferred from **pred_names**.
         :param prop_cycle_map: ``dict``, ``list`` of ``int``, or ``None``; Integer indices to use in the properties cycle for each entry in **pred_names**. If a ``dict``, a map from predictor names to ``int``. If a ``list`` of ``int``, predictors inferred using **pred_names** are aligned to ``int`` indices one-to-one. If ``None``, indices are automatically assigned.
-        :param plot_dirac: ``bool``; whether to include any Dirac delta IRF's (stick functions at t=0) in plot.
+        :param plot_dirac: ``bool`` or ``None``; whether to include any Dirac delta IRF's (stick functions at t=0) in plot. If ``None``, use default setting.
         :param reference_time: ``float`` or ``None``; timepoint at which to plot interactions. If ``None``, use default setting.
         :param plot_rangf: ``bool``; whether to plot all (marginal) random effects.
         :param plot_n_time_units: ``float`` or ``None``; resolution of plot axis (for 3D plots, uses sqrt of this number for each axis). If ``None``, use default setting.
@@ -10438,6 +10438,8 @@ class CDRModel(object):
 
         mc = bool(n_samples) and (self.is_bayesian or self.has_dropout)
 
+        if plot_dirac is None:
+            plot_dirac = self.plot_dirac
         if reference_time is None:
             reference_time = self.reference_time
         if plot_n_time_units is None:
@@ -10683,7 +10685,9 @@ class CDRModel(object):
 
         # Curvature plots
         if generate_curvature_plots:
-            names = [x for x in self.impulse_names if (self.is_non_dirac(x) and x != 'rate')]
+            names = [x for x in self.impulse_names if x != 'rate']
+            if not plot_dirac:
+                names = [x for x in names if self.is_non_dirac(x)]
             if pred_names is not None and len(pred_names) > 0:
                 new_names = []
                 for i, name in enumerate(names):
