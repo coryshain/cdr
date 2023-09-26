@@ -10317,7 +10317,7 @@ class CDRModel(object):
             sort_names=True,
             prop_cycle_length=None,
             prop_cycle_map=None,
-            plot_dirac=False,
+            plot_dirac=None,
             reference_time=None,
             plot_rangf=False,
             plot_n_time_units=None,
