@@ -10686,8 +10686,6 @@ class CDRModel(object):
         # Curvature plots
         if generate_curvature_plots:
             names = [x for x in self.impulse_names if x != 'rate']
-            if not plot_dirac:
-                names = [x for x in names if self.is_non_dirac(x)]
             if pred_names is not None and len(pred_names) > 0:
                 new_names = []
                 for i, name in enumerate(names):
