@@ -10695,11 +10695,15 @@ class CDRModel(object):
                 names = new_names
 
             for name in names:
+                if self.is_non_dirac(name):
+                    _reference_time = reference_time
+                else:
+                    _reference_time = 0.
                 plot_x, plot_y, lq, uq, samples = self.get_plot_data(
                     xvar=name,
                     responses=responses,
                     response_params=response_params,
-                    t_delta_ref=reference_time,
+                    t_delta_ref=_reference_time,
                     ref_varies_with_x=False,
                     manipulations=manipulations,
                     pair_manipulations=True,
@@ -10715,14 +10719,13 @@ class CDRModel(object):
 
                 for _response in plot_y:
                     for _dim_name in plot_y[_response]:
-                        param_names = self.get_response_params(_response)
                         include_param_name = True
 
                         plot_name = 'curvature_%s' % sn(_response)
                         if include_param_name:
                             plot_name += '_%s' % _dim_name
 
-                        plot_name += '_%s_at_delay%s' % (sn(name), reference_time)
+                        plot_name += '_%s_at_delay%s' % (sn(name), _reference_time)
 
                         if use_horiz_axlab:
                             xlab = name
