@@ -79,8 +79,11 @@ if __name__ == '__main__':
                         job_str = wrapper % ('python3 -m cdr.bin.train %s -m %s -s -S %s' % (path, m, cli_args))
                     elif job_type.lower() == 'fit':
                         job_str = wrapper % ('python3 -m cdr.bin.train %s -m %s %s' % (path, m, cli_args))
-                    elif partitions and job_type.lower() in ['fit', 'predict']:
-                        job_str = wrapper % ('python3 -m cdr.bin.predict %s -p %s -m %s %s' % (path, ' '.join(partitions), m, cli_args))
+                    elif job_type.lower() == 'predict':
+                        if partitions:
+                            job_str = wrapper % ('python3 -m cdr.bin.predict %s -p %s -m %s %s' % (path, ' '.join(partitions), m, cli_args))
+                        else:
+                            job_str = wrapper % ('python3 -m cdr.bin.predict %s -m %s %s' % (path, m, cli_args))
                     elif job_type.lower() == 'summarize':
                         job_str = wrapper % ('python3 -m cdr.bin.summarize %s -m %s %s' % (path, m, cli_args))
                     elif job_type.lower() == 'plot':

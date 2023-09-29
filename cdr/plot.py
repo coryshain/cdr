@@ -37,6 +37,8 @@ def plot_irf(
         legend=True,
         xlab=None,
         ylab=None,
+        x_max_ticks=None,
+        y_max_ticks=None,
         use_line_markers=False,
         use_grid=True,
         transparent_background=False,
@@ -64,6 +66,8 @@ def plot_irf(
     :param legend: ``bool``; include a legend.
     :param xlab: ``str`` or ``None``; x-axis label. If ``None``, no label.
     :param ylab: ``str`` or ``None``; y-axis label. If ``None``, no label.
+    :param x_max_ticks: ``int`` or ``None``; Max number of ticks to use on the x-axis. If ``None``, no use matplotlib defaults.
+    :param y_max_ticks: ``int`` or ``None``; Max number of ticks to use on the y-axis. If ``None``, no use matplotlib defaults.
     :param use_line_markers: ``bool``; add markers to IRF lines.
     :param use_grid: ``bool``; whether to show a background grid.
     :param transparent_background: ``bool``; use a transparent background. If ``False``, uses a white background.
@@ -145,6 +149,11 @@ def plot_irf(
     ax.set_xlim(xlim)
     if ylim is not None:
         ax.set_ylim(ylim)
+
+    if x_max_ticks:
+        ax.xaxis.set_major_locator(plt.MaxNLocator(x_max_ticks))
+    if y_max_ticks:
+        ax.yaxis.set_major_locator(plt.MaxNLocator(y_max_ticks))
 
     fig.set_size_inches(plot_x_inches, plot_y_inches)
     fig.tight_layout()

@@ -48,6 +48,9 @@ if __name__ == '__main__':
         all_positive = True
     else:
         all_positive = False
+    highlight = settings.get('highlight', [])
+    highlight_set = set()
+    higlight = set(highlight)
     bold_signif = settings.get('bold_signif', True)
     color_by_sign = settings.get('color_by_sign', False)
     include_missing_rows = settings.get('include_missing_rows', False)
@@ -188,10 +191,14 @@ if __name__ == '__main__':
                 if group not in comparisons_found:
                     comparisons_found[group] = []
                 comparisons_found[group].append(comparison_name)
+                if comparison in highlight:
+                    highlight_set.add(comparison_name)
             else:
                 if group not in comparisons_found:
                     comparisons_found[group] = []
                 comparisons_found[group].append(comparison_name)
+                if comparison in highlight:
+                    highlight_set.add(comparison_name)
                 _positive_only = all_positive or comparison in positive_only
                 if color_by_sign and not _positive_only:
                     for delim in delimiters:
@@ -209,6 +216,8 @@ if __name__ == '__main__':
                                 _comparison_name = comparison_name
                             row[0] = _comparison_name
                             comparisons_found[group][-1] = row[0]
+                            if comparison in highlight:
+                                highlight_set.add(_comparison_name)
                 for dataset in datasets:
                     res2 = res1.get(dataset, {})
                     for response in responses[dataset]:
@@ -261,11 +270,19 @@ if __name__ == '__main__':
             comparison = row[0]
             group = row[1]
             group_len = len(comparisons_found[group])
-            _prefix = prefix
+            prefix = '    '
+            if comparison in highlight_set:
+                prefix += '\\rowcolor{highlight} '
             if comparison == comparisons_found[group][0]:  # First in group
                 print('\n    \hline')
+            if comparison == comparisons_found[group][-1]:  # Last in group
                 if len(comparisons) > 1:
-                    _prefix = '    \multirow{%s}{*}{\\rotatebox[origin=c]{90}{%s}} & ' % (group_len, group)
-            print(_prefix + ' & '.join(row[0:1] + row[2:]) + '\\\\')
+                    prefix += '\multirow{-%s}{*}{\\rotatebox[origin=c]{90}{%s}} & ' % (group_len, group)
+                else:
+                    prefix += '& '
+            elif len(comparisons) > 1:
+                prefix += '& '
+                
+            print(prefix + ' & '.join(row[0:1] + row[2:]) + '\\\\')
         print('  \\end{tabular}')
         print('\\end{table}')

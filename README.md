@@ -67,8 +67,66 @@ To check model likelihoods and tabulate significance tests, respectively run:
 
 Full documentation and API are available here: https://cdr.readthedocs.io/en/latest/.
 
+## Supplementary GAM analyses
+
+To preprocess data for GAM fitting to a given dataset, run:
+
+    python -m cdr.gam.get_gam_data pred_fn_ini/<DATASET>.ini
+
+To generate regression scripts, run:
+
+    python -m cdr.gam.make_gam_jobs
+
+This will generate R scripts (`*.R`) and SLURM batch scripts (`*.pbs`) corresponding to each GAM model in the analysis, saved in a directory called `gam_scripts`.
+
+To generate plots from fitted GAM models, run:
+
+    python -m cdr.gam.plot
+
+To generate SLURM batch jobs for hypothesis tests, run:
+
+    python -m cdr.gam.make_test_jobs
+
+This will generate several batch scripts (`*.pbs`) in the current directory that can be submitted to job scheduler.
+
+To generate performance tables for a given dataset, run:
+
+    python -m cdr.gam.gam_error_table <NAME_OF_CORPUS>
+
+## Supplementary analyses of data from Brothers & Kuperberg (2021)
+
+To collate Brothers & Kuperberg's (BK21's) stimuli for analysis, run:
+
+    python -m cdr.bk21.get_items
+
+To compute unigram, GPT2, and GloVe features for these items run (respectively):
+
+    python -m cdr.bk21.add_{unigram,gpt,glove}
+
+To merge these textual features with the SPR and naming data for analysis, run (respectively):
+
+    python -m cdr.bk21.merge_{spr,naming}
+
+To generate regression scripts, run:
+
+    python -m cdr.bk21.make_bk21_jobs
+
+This will generate R scripts (`*.R`) and SLURM batch files (`*.pbs`) corresponding to each model in the analysis, saved in a directory called `bk21_scripts`.
+
+To generate plots (requires that all regressions have completed), run:
+
+    python -m cdr.bk21.plot
+
+To generate SLURM batch jobs for hypothesis tests, run:
+
+    python -m cdr.bk21.make_test_jobs
+
+This will generate several batch scripts (`*pbs`) in the current directory that can be submitted to the job scheduler.
+
 ## References
 Shain, Cory and Schuler, William (2018). Deconvolutional time series regression: A technique for modeling temporally diffuse effects. _EMNLP18_.
+
+Brothers, Trevor and Kuperberg, Gina (2021). Word predictability effects are linear, not logarithmic: Implications for probabilistic models of sentence comprehension. _JML_.
 
 Shain, Cory and Schuler, William (2021). Continuous-time deconvolutional regression for psycholinguistic modeling. _Cognition_.
 

@@ -4992,7 +4992,7 @@ class CDRModel(object):
                     pred_mean = response_dist.mean()
                     self.predictive_distribution[response] = response_dist
                     self.has_analytical_mean[response] = response_dist.has_analytical_mean()
-                    if not self.is_categorical(response):
+                    if self.is_real(response):
                         base_response_dist, _, _ = self._initialize_predictive_distribution_inner(
                             response,
                             param_type='output_base'
@@ -9890,10 +9890,14 @@ class CDRModel(object):
 
         if responses is None:
             responses = self.response_names
+        
         if response_params is None:
-            response_params = {'mean'}
-            for _response in responses:
-                response_params.add(self.get_response_params(_response)[0])
+            response_params = set()
+            for response in responses:
+                if self.is_real(response) and self.has_analytical_mean[response]:
+                    response_params.add('mean')
+                else:
+                    response_params.add(self.get_response_params(response)[0])
             response_params = sorted(list(response_params))
 
         for g, gf_y_ref in enumerate(gf_y_refs):
@@ -10127,7 +10131,7 @@ class CDRModel(object):
         if response_params is None:
             response_params = set()
             for response in responses:
-                if self.has_analytical_mean[response]:
+                if self.is_real(response) and self.has_analytical_mean[response]:
                     response_params.add('mean')
                 else:
                     response_params.add(self.get_response_params(response)[0])
