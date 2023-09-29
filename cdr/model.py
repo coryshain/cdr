@@ -866,20 +866,12 @@ class CDRModel(object):
                             t_delta = _Y_time[j] - _X_time_slice
                             t_deltas.append(t_delta)
                             t_delta_maxes.append(_Y_time[j] - _X_time[s])
+        if not len(X_time):
+            X_time = Y_time
         X_time = np.concatenate(X_time, axis=0)
         assert np.all(np.isfinite(X_time)), 'Stimulus sequence contained non-finite timestamps'
         Y_time = np.concatenate(Y_time, axis=0)
         assert np.all(np.isfinite(Y_time)), 'Response sequence contained non-finite timestamps'
-        t_deltas = np.concatenate(t_deltas, axis=0)
-        t_delta_maxes = np.array(t_delta_maxes)
-        t_delta_quantiles = np.quantile(t_deltas, q)
-
-        self.t_delta_limit = np.quantile(t_deltas, 0.75)
-        self.t_delta_quantiles = t_delta_quantiles
-        self.t_delta_max = t_deltas.max()
-        self.t_delta_mean_max = t_delta_maxes.mean()
-        self.t_delta_mean = t_deltas.mean()
-        self.t_delta_sd = t_deltas.std()
 
         self.X_time_limit = np.quantile(X_time, 0.75)
         self.X_time_quantiles = np.quantile(X_time, q)
@@ -890,6 +882,24 @@ class CDRModel(object):
         self.Y_time_quantiles = np.quantile(Y_time, q)
         self.Y_time_mean = Y_time.mean()
         self.Y_time_sd = Y_time.std()
+
+        if len(t_deltas):
+            t_deltas = np.concatenate(t_deltas, axis=0)
+            t_delta_maxes = np.array(t_delta_maxes)
+            t_delta_quantiles = np.quantile(t_deltas, q)
+            self.t_delta_limit = np.quantile(t_deltas, 0.75)
+            self.t_delta_quantiles = t_delta_quantiles
+            self.t_delta_max = t_deltas.max()
+            self.t_delta_mean_max = t_delta_maxes.mean()
+            self.t_delta_mean = t_deltas.mean()
+            self.t_delta_sd = t_deltas.std()
+        else:
+            self.t_delta_limit = self.epsilon
+            self.t_delta_quantiles = np.zeros(len(q))
+            self.t_delta_max = 0.
+            self.t_delta_mean_max = 0.
+            self.t_delta_mean = 0.
+            self.t_delta_sd = 1.
 
         ## Set up hash table for random effects lookup
         stderr('\r    Computing random effects statistics...\n')

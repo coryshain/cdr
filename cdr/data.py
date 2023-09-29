@@ -510,7 +510,14 @@ def build_CDR_impulse_data(
 
     if X_in_Y_names:
         assert X_in_Y is not None, 'X_in_Y must be provided if X_in_Y_names is not ``None``.'
-        X_in_Y_shape = (X_out.shape[0], X_out.shape[1], len(X_in_Y_names))
+        if len(impulse_names_X):
+            T = X_out.shape[1]
+        else:
+            T = 1
+            X_out = X_out[:, :T]
+            X_time_out = X_time_out[:, :T]
+            X_mask_out = X_mask_out[:, :T]
+        X_in_Y_shape = (X_out.shape[0], T, len(X_in_Y_names))
         _X_in_Y = np.zeros(X_in_Y_shape)
         _X_in_Y[:, -1, :] = X_in_Y[X_in_Y_names].values
         X_out = np.concatenate([X_out, _X_in_Y], axis=2)
