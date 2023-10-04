@@ -145,7 +145,7 @@ if __name__ == '__main__':
     system_names = args.system_names
     base_partitions = args.partitions
     if base_partitions is None:
-        base_partitions = ['train', 'CVdev', 'CVtest', 'dev', 'test']
+        base_partitions = ['CVtrain', 'train', 'CVdev', 'CVtest', 'dev', 'test']
     partitions_found = set()
 
     results = {}
