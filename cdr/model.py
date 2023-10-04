@@ -8060,12 +8060,18 @@ class CDRModel(object):
 
                 if not self.training_complete.eval(session=self.session) or force_training_evaluation:
                     # Extract and save predictions
+                    if self.crossval_use_dev_fold:
+                        train_name = 'CVtrain'
+                        dev_name = 'CVdev'
+                    else:
+                        train_name = 'train'
+                        dev_name = 'dev'
                     metrics, summary = self.evaluate(
                         X_in,
                         Y_in,
                         X_in_Y_names=X_in_Y_names,
                         dump=True,
-                        partition='train',
+                        partition=train_name,
                         optimize_memory=optimize_memory
                     )
 
@@ -8075,7 +8081,7 @@ class CDRModel(object):
                             Y_dev,
                             X_in_Y_names=X_in_Y_names,
                             dump=True,
-                            partition='dev',
+                            partition=dev_name,
                             optimize_memory=optimize_memory
                         )
                         
