@@ -100,6 +100,7 @@ if __name__ == '__main__':
     argparser.add_argument('-S', '--system_names',  nargs='+', default=None, help='Names of systems (should be in 1-1 alignment with ``systems``. If not provided, names will be inferred from systems.')
     argparser.add_argument('-p', '--partitions',  nargs='+', default=None, help='Names of partitions to evaluate. If not provided, defaults to ``"train"``, ``"dev"``, ``"test"``.')
     argparser.add_argument('-a', '--agg', type=str, default='median', help='Aggregation function to use over ensembles. E.g., ``"mean"``, ``"median"``, ``"min"``, ``"max"``.')
+    argparser.add_argument('-C', '--collapse', action='store_true', help='Collapse (sum across) all response variables for a given model.')
     argparser.add_argument('-c', '--csv', action='store_true', help='Output to CSV.')
     args = argparser.parse_args()
 
@@ -118,11 +119,14 @@ if __name__ == '__main__':
     else:
         raise ValueError('Unrecognized metric: %s.' % args.metric)
 
-    if args.task_names is None:
-        task_names = [os.path.splitext(os.path.basename(p))[0] for p in args.config_paths]
+    if args.collapse:
+        task_names = ['Response']
     else:
-        task_names = args.task_names[:]
-    assert len(args.config_paths) == len(task_names)
+        if args.task_names is None:
+            task_names = [os.path.splitext(os.path.basename(p))[0] for p in args.config_paths]
+        else:
+            task_names = args.task_names[:]
+        assert len(args.config_paths) == len(task_names)
 
     if args.baselines is None:
         baselines = []
@@ -163,7 +167,10 @@ if __name__ == '__main__':
                             if (not response or response in path) and path.startswith('eval') and path.endswith('%s.txt' % partition):
                                 eval_path = p.outdir + '/' + b_path + '/' + path
                                 _response = path.split('_')[1]
-                                _task_name = task_names[i] + ' ' + _response
+                                if args.collapse:
+                                    _task_name = task_names[0]
+                                else:
+                                    _task_name = task_names[i] + ' ' + _response
                                 converged = True
                                 if b.startswith('LME'):
                                     converged = False
@@ -177,7 +184,15 @@ if __name__ == '__main__':
                                             if baseline_names[j] not in results[_task_name]:
                                                 results[_task_name][baseline_names[j]] = {}
                                             if partition not in results[_task_name][baseline_names[j]]:
-                                                results[_task_name][baseline_names[j]][partition] = {'loss': val, 'converged': converged}
+                                                results[_task_name][baseline_names[j]][partition] = {}
+                                            if 'loss' not in results[_task_name][baseline_names[j]][partition]:
+                                                results[_task_name][baseline_names[j]][partition]['loss'] = val
+                                            else:
+                                                results[_task_name][baseline_names[j]][partition]['loss'] += val
+                                            if 'converged' not in results[_task_name][baseline_names[j]][partition]:
+                                                results[_task_name][baseline_names[j]][partition]['converged'] = converged
+                                            else:
+                                                results[_task_name][baseline_names[j]][partition]['converged'] += converged
                                         if line.strip() == 'No convergence warnings.':
                                             converged = True
                                         line = f.readline()
@@ -190,7 +205,10 @@ if __name__ == '__main__':
                             if (not response or response in path) and path.startswith('eval') and path.endswith('%s.txt' % partition):
                                 eval_path = p.outdir + '/' + s_path + '/' + path
                                 _response = path.split('_')[1]
-                                _task_name = task_names[i] + ' ' + _response
+                                if args.collapse:
+                                    _task_name = task_names[0]
+                                else:
+                                    _task_name = task_names[i] + ' ' + _response
                                 converged = True
                                 if s.startswith('LME'):
                                     converged = False
@@ -204,7 +222,15 @@ if __name__ == '__main__':
                                             if _system_names[j] not in results[_task_name]:
                                                 results[_task_name][_system_names[j]] = {}
                                             if partition not in results[_task_name][_system_names[j]]:
-                                                results[_task_name][_system_names[j]][partition] = {'loss': val, 'converged': converged}
+                                                results[_task_name][_system_names[j]][partition] = {}
+                                            if 'loss' not in results[_task_name][_system_names[j]][partition]:
+                                                results[_task_name][_system_names[j]][partition]['loss'] = val
+                                            else:
+                                                results[_task_name][_system_names[j]][partition]['loss'] += val
+                                            if 'converged' not in results[_task_name][_system_names[j]][partition]:
+                                                results[_task_name][_system_names[j]][partition]['converged'] = converged
+                                            else:
+                                                results[_task_name][_system_names[j]][partition]['converged'] += converged
                                         if line.strip() == 'No convergence warnings.':
                                             converged = True
                                         line = f.readline()
