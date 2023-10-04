@@ -19,6 +19,7 @@ PLOT_HEIGHT = 6
 PLOT_DPI = 300
 SCREEN_DPI = 72
 
+
 def get_resparams(model, response):
     resparams = []
     if response in model.response_names:
@@ -28,14 +29,14 @@ def get_resparams(model, response):
     return resparams
 
 
-def get_surface_colorscale(z):
+def get_surface_colorscale(z, eps=1e-5):
     blue = np.array((0, 0, 255))
     red = np.array((255, 0, 0))
     gray = np.array((220, 220, 220))
 
     lower = z.min()
     upper = z.max()
-    mag = max(np.abs(upper), np.abs(lower))
+    mag = max(np.abs(upper) + eps, np.abs(lower) + eps)
     lower_p = lower / mag
     upper_p = upper / mag
     if lower_p < 0:
@@ -1060,7 +1061,7 @@ if __name__ == '__main__':
     p = Config(config_path)
     model = args.model
     if not model:
-        model_list = sorted(set(p.model_list) | set(p.ensemble_list))
+        model_list = sorted(set(p.model_names) | set(p.ensemble_names))
         models = filter_models(model_list, cdr_only=True)
         model = models[0]
 
