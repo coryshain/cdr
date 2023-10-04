@@ -48,7 +48,7 @@ if __name__ == '__main__':
         if not p.use_gpu_if_available or args.cpu_only:
             os.environ['CUDA_VISIBLE_DEVICES'] = '-1'
 
-        model_list = sorted(set(p.model_list) | set(p.ensemble_list))
+        model_list = sorted(set(p.model_names) | set(p.ensemble_names) | set(p.crossval_family_names))
         models = filter_models(model_list, args.models, cdr_only=True)
 
         prefix = plot_config['prefix']
@@ -76,7 +76,7 @@ if __name__ == '__main__':
         plot_kwargs = {x: plot_config[x] for x in plot_config.settings_core if x not in ('prefix', 'key',)}
         plot_kwargs.update(extra_kwargs)
 
-        synth_path = os.path.dirname(os.path.dirname(p.X_train)) + '/d.obj'
+        synth_path = os.path.dirname(os.path.dirname(p.X_train[0])) + '/d.obj'
         if plot_true_synthetic and os.path.exists(synth_path):
             with open(synth_path, 'rb') as f:
                 d = pickle.load(f)

@@ -33,9 +33,33 @@ def extract_cdr_prediction_data(dirpath, metric='mse'):
     basename = os.path.basename(dirpath)
     parentdir = os.path.normpath(os.path.dirname(dirpath))
     modeldirs = []
+    use_crossval = False
+    folds = set()
+    ensembleids = set()
+    modeldir2fold = {}
+    modeldir2ensembleid = {}
     for x in os.listdir(parentdir):
-        if x == basename or (x.startswith(basename) and re.match('\.m\d+', x[len(basename):])):
-            modeldirs.append(os.path.join(parentdir, x))
+        if os.path.isdir(os.path.join(parentdir, x)):
+            ensemble = re.match('\.m\d+', x[len(basename):])
+            cv = re.match('\.CV[^.~]+~([^.~]+)(\.m(\d+))?', x[len(basename):])
+            if x == basename or \
+                    (x.startswith(basename) and (ensemble or cv)):
+                x_full = os.path.join(parentdir, x)
+
+                if cv:
+                    fold = cv.group(1)
+                    modeldir2fold[x] = fold
+                    folds.add(fold)
+
+                    ensembleid = cv.group(3)
+                    modeldir2ensembleid[x] = ensembleid
+                    ensembleids.add(ensembleid)
+
+                    use_crossval = True
+
+                modeldirs.append(x_full)
+    folds = sorted(list(folds))
+    ensembleids = sorted(list(ensembleids))
     if len(modeldirs) > 1: # Ensemble
         try:
             modeldirs.remove(os.path.normpath(dirpath))
@@ -98,8 +122,47 @@ def extract_cdr_prediction_data(dirpath, metric='mse'):
                     out[response][filenum][partition] = {}
                 if predtype not in out[response][filenum][partition]:
                     out[response][filenum][partition][predtype] = {}
-                if model_basename not in out[response][filenum][partition][predtype]:
+                if model_basename in out[response][filenum][partition][predtype]:
+                    raise ValueError('Found redundant results file: %s.' % data_path)
+                else:
                     out[response][filenum][partition][predtype][model_basename] = a
+
+    # Concatenate across crossval folds if needed
+    if use_crossval:
+        _out = {}
+        for response in out:
+            if response not in _out:
+                _out[response] = {}
+            for filenum in out[response]:
+                if filenum not in _out[response]:
+                    _out[response][filenum] = {}
+                for partition in out[response][filenum]:
+                    if partition not in _out[response][filenum]:
+                        _out[response][filenum][partition] = {}
+                    for predtype in out[response][filenum][partition]:
+                        if predtype not in _out[response][filenum][partition]:
+                            _out[response][filenum][partition][predtype] = {}
+                        ensembles = {}
+                        for model_basename in out[response][filenum][partition][predtype]:
+                            ensembleid = modeldir2ensembleid[model_basename]
+                            if ensembleid not in ensembles:
+                                ensembles[ensembleid] = {}
+                            fold = modeldir2fold[model_basename]
+                            if fold not in ensembles[ensembleid]:
+                                ensembles[ensembleid][fold] = out[response][filenum][partition][predtype][model_basename]
+                            else:
+                                raise ValueError('Found redundant results file: %s.' % model_basename)
+                        for ensembleid in ensembleids:
+                            outname = basename
+                            if ensembleid is not None:
+                                outname += '.m%s' % ensembleid
+                            ensemble = []
+                            for fold in folds:
+                                ensemble.append(ensembles[ensembleid][fold])
+                            ensemble = pd.concat(ensemble, axis=0).reset_index(drop=True)
+                            _out[response][filenum][partition][predtype][outname] = ensemble
+
+        out = _out
 
     return out
 

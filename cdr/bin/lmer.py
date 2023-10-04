@@ -27,7 +27,7 @@ if __name__ == '__main__':
 
         p = Config(path)
 
-        models = filter_models(p.model_list, args.models, cdr_only=True)
+        models = filter_models(p.model_names, args.models, cdr_only=True)
 
         models = [x for x in filter_models(models, cdr_only=True)]
 

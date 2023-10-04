@@ -19,6 +19,7 @@ from .plot import *
 
 NN_KWARG_BY_KEY = {x.key: x for x in NN_KWARGS + NN_BAYES_KWARGS}
 ENSEMBLE = re.compile('\.m\d+')
+CROSSVAL = re.compile('\.CV([^.~]+)~([^.~]+)')
 N_MCIFIED_DIST_RESAMP = 10000
 
 import tensorflow as tf
@@ -579,12 +580,19 @@ class CDRModel(object):
             Y = [Y]
 
         # Cross validation settings
-        self.crossval_factor = kwargs['crossval_factor']
-        del kwargs['crossval_factor']
-        self.crossval_fold = kwargs['crossval_fold']
+        for crossval_kwarg in (
+            'crossval_factor',
+            'crossval_folds',
+            'crossval_fold',
+            'crossval_dev_fold'
+        ):
+            setattr(self, crossval_kwarg, kwargs[crossval_kwarg])
+            del kwargs[crossval_kwarg]
+        use_crossval = bool(self.crossval_factor)
+        if use_crossval:
+            Y = [_Y[_Y[self.crossval_factor] != self.crossval_fold] for _Y in Y]
 
         # Plot default settings
-        del kwargs['crossval_fold']
         self.irf_name_map = kwargs['irf_name_map']
         del kwargs['irf_name_map']
 
@@ -1243,6 +1251,7 @@ class CDRModel(object):
         self.n_impulse_df_noninteraction = len(impulse_dfs_noninteraction)
 
         self.use_crossval = bool(self.crossval_factor)
+        self.crossval_use_dev_fold = bool(self.crossval_dev_fold)
 
         for x in self.indicator_names.split():
             self.indicators.add(x)
@@ -1595,7 +1604,9 @@ class CDRModel(object):
             'indicators': self.indicators,
             'outdir': self.outdir,
             'crossval_factor': self.crossval_factor,
+            'crossval_folds': self.crossval_folds,
             'crossval_fold': self.crossval_fold,
+            'crossval_dev_fold': self.crossval_dev_fold,
             'irf_name_map': self.irf_name_map,
             'git_hash': self.git_hash,
             'pip_version': self.pip_version
@@ -1649,7 +1660,9 @@ class CDRModel(object):
         self.indicators = md.pop('indicators', set())
         self.outdir = md.pop('outdir', './cdr_model/')
         self.crossval_factor = md.pop('crossval_factor', None)
-        self.crossval_fold = md.pop('crossval_fold', [])
+        self.crossval_folds = md.pop('crossval_fold', [])
+        self.crossval_fold = md.pop('crossval_fold', None)
+        self.crossval_dev_fold = md.pop('crossval_dev_fold', None)
         self.irf_name_map = md.pop('irf_name_map', {})
         self.git_hash = md.pop('git_hash', None)
         self.pip_version = md.pop('pip_version', None)
@@ -7146,6 +7159,8 @@ class CDRModel(object):
             out += ' ' * (indent + 2) + '%s: %s\n' %(kwarg.key, "\"%s\"" %val if isinstance(val, str) else val)
         out += ' ' * (indent + 2) + '%s: %s\n' % ('crossval_factor', "\"%s\"" % self.crossval_factor)
         out += ' ' * (indent + 2) + '%s: %s\n' % ('crossval_fold', self.crossval_fold)
+        if self.crossval_use_dev_fold:
+            out += ' ' * (indent + 2) + '%s: %s\n' % ('crossval_dev_fold', self.crossval_dev_fold)
         if self.git_hash:
             out += ' ' * (indent + 2) + 'Git hash: %s\n' % self.git_hash
         if self.pip_version:
@@ -7714,10 +7729,30 @@ class CDRModel(object):
         :param optimize_memory: ``bool``; Compute expanded impulse arrays on the fly rather than pre-computing. Can reduce memory consumption by orders of magnitude but adds computational overhead at each minibatch, slowing training (typically around 1.5-2x the unoptimized training time).
         """
 
-        if self.early_stopping and self.eval_freq > 0:
-            assert X_dev is not None, 'X_dev must be specified if early stopping is used'
-            assert Y_dev is not None, 'Y_dev must be specified if early stopping is used'
+        if not isinstance(X, list):
+            X = [X]
+        if Y is not None and not isinstance(Y, list):
+            Y = [Y]
 
+        cv_exclude = []
+        if self.crossval_use_dev_fold:
+            assert X_dev is None, '``X_dev`` cannot be specified for models that use ``crossval_dev_fold``.' + \
+                                  'Either provide a value for ``X_dev`` or set ``crossval_dev_fold`` to ``None.'
+            assert Y_dev is None, '``Y_dev`` cannot be specified for models that use ``crossval_dev_fold``. ' + \
+                                  'Either provide a value for ``Y_dev`` or set ``crossval_dev_fold`` to ``None.'
+            X_dev = X
+            Y_dev = [_Y[_Y[self.crossval_factor] == self.crossval_dev_fold] for _Y in Y]
+            cv_exclude.append(self.crossval_dev_fold)
+
+        if self.early_stopping and self.eval_freq > 0:
+            assert X_dev is not None, '``X_dev`` must be specified if early stopping is used'
+            assert Y_dev is not None, '``Y_dev`` must be specified if early stopping is used'
+
+        # Preprocess data
+        # Training data
+        if self.use_crossval:
+            cv_exclude.append(self.crossval_fold)
+            Y = [_Y[~_Y[self.crossval_factor].isin(cv_exclude)] for _Y in Y]
         lengths = [len(_Y) for _Y in Y]
         n = sum(lengths)
         if not np.isfinite(self.minibatch_size):
@@ -7730,24 +7765,16 @@ class CDRModel(object):
         with open(self.outdir + '/initialization_summary.txt', 'w') as i_file:
             i_file.write(self.initialization_summary())
 
-        usingGPU = tf.test.is_gpu_available()
-        stderr('Using GPU: %s\nNumber of training samples: %d\n\n' % (usingGPU, n))
-
         if not n_iter:
             n_iter = self.n_iter
 
-        # Preprocess data
-        # Training data
-        if not isinstance(X, list):
-            X = [X]
-        if Y is not None and not isinstance(Y, list):
-            Y = [Y]
-        if self.use_crossval:
-            Y = [_Y[self.crossval_factor].isin(self.crossval_folds) for _Y in Y]
         X_in = X
         Y_in = Y
         if X_in_Y_names:
             X_in_Y_names = [x for x in X_in_Y_names if x in self.impulse_names]
+
+        usingGPU = tf.test.is_gpu_available()
+        stderr('Using GPU: %s\nNumber of training samples: %d\n\n' % (usingGPU, n))
 
         Y, first_obs, last_obs, Y_time, Y_mask, Y_gf, X_in_Y = build_CDR_response_data(
             self.response_names,
@@ -7785,7 +7812,8 @@ class CDRModel(object):
                     self.set_training_complete(False)
 
                 if self.training_complete.eval(session=self.session):
-                    stderr('Model training is already complete; no additional updates to perform. To train for additional iterations, re-run fit() with a larger n_iter.\n\n')
+                    stderr('Model training is already complete; no additional updates to perform.' + \
+                           'To train for additional iterations, re-run fit() with a larger n_iter.\n\n')
                 else:
                     if self.global_step.eval(session=self.session) == 0:
                         if not type(self).__name__.startswith('CDRNN'):
@@ -7925,11 +7953,15 @@ class CDRModel(object):
                         if self.eval_freq > 0 and \
                                 self.global_step.eval(session=self.session) % self.eval_freq == 0:
                             self.save()
+                            if self.crossval_use_dev_fold:
+                                partition_name = 'CVdev'
+                            else:
+                                partition_name = 'dev'
                             dev_results, _ = self.evaluate(
                                 X_dev,
                                 Y_dev,
                                 X_in_Y_names=X_in_Y_names,
-                                partition='dev',
+                                partition=partition_name,
                                 optimize_memory=optimize_memory
                             )
                             dev_ll = dev_results['full_log_lik']
@@ -11062,7 +11094,8 @@ class CDRModel(object):
                                 row += (dim_name, mean[i, j, k], lower[i, j, k], upper[i, j, k])
                                 df.append(row)
                             else:
-                                for l, level in enumerate(levels):
+                                for l, level in enumerate(
+                                        evels):
                                     row = ('coefficient_%s' % coef_name,)
                                     if len(self.response_names) > 1:
                                         row += (response,)
@@ -11208,16 +11241,12 @@ class CDREnsemble(CDRModel):
     __doc__ = _doc_header + _doc_args
 
     def __init__(self, outdir_top, name):
+
         self.weight_type = 'uniform'
         self.outdir_top = os.path.normpath(outdir_top)
         self.ensemble_name = name
         mpaths = [
-            os.path.join(self.outdir_top,x) for x in os.listdir(self.outdir_top) if
-            (
-                x.startswith(name) and
-                ENSEMBLE.match(x[len(name):]) and
-                os.path.isdir(os.path.join(self.outdir_top,x))
-            )
+            os.path.join(self.outdir_top,x) for x in os.listdir(self.outdir_top) if self.match_path(x)
         ]
         if not len(mpaths):
             mpaths = [os.path.join(self.outdir_top, name)]
@@ -11244,6 +11273,20 @@ class CDREnsemble(CDRModel):
     @property
     def n_ensemble(self):
         return len(self.models)
+
+    def match_path(self, path):
+        name = self.ensemble_name
+        match = path.startswith(name)
+        match &= os.path.isdir(os.path.join(self.outdir_top, path))
+
+        if match:
+            match = ENSEMBLE.match(path[len(name):])
+            if not match:
+                match = CROSSVAL.match(path[len(name):])
+        else:
+            match = False
+
+        return match
 
     def set_weight_type(self, weight_type):
         if weight_type in ('uniform', 'll'):
