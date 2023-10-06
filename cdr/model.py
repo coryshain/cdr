@@ -1660,7 +1660,7 @@ class CDRModel(object):
         self.indicators = md.pop('indicators', set())
         self.outdir = md.pop('outdir', './cdr_model/')
         self.crossval_factor = md.pop('crossval_factor', None)
-        self.crossval_folds = md.pop('crossval_fold', [])
+        self.crossval_folds = md.pop('crossval_folds', [])
         self.crossval_fold = md.pop('crossval_fold', None)
         self.crossval_dev_fold = md.pop('crossval_dev_fold', None)
         self.irf_name_map = md.pop('irf_name_map', {})
