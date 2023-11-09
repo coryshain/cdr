@@ -38,7 +38,7 @@ if __name__ == '__main__':
     b = pd.read_csv(df1_path, sep=' ', header=None, skipinitialspace=True)
     select = np.logical_and(np.isfinite(np.array(a)), np.isfinite(np.array(b)))
     diff = float(len(a) - select.sum())
-    p_value, base_diff, diffs = permutation_test(
+    p_value, _, _, base_diff, diffs = permutation_test(
         a[select],
         b[select],
         n_iter=10000,
