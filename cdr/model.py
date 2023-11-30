@@ -5068,7 +5068,7 @@ class CDRModel(object):
                         irf_weights = tf.gather(irf_weights, terminal_ix, axis=2)
                         X_weighted_by_irf = self.irf_impulses * irf_weights
                     else:
-                        X_weighted_by_irf = tf.zeros((1, 1, 1, 1, 1), dtype=self.FLOAT_TF)
+                        X_weighted_by_irf = tf.zeros_like(self.X)[..., None, None] # Expand param and param_dim dimensions
 
                     X_weighted_unscaled = X_weighted_by_irf
                     X_weighted_unscaled_sumT = tf.reduce_sum(X_weighted_by_irf, axis=1, keepdims=True)
