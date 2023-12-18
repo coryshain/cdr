@@ -9111,10 +9111,11 @@ class CDRModel(object):
                                         metrics['percent_variance_explained'][_response][ix][
                                             t, k] = percent_variance_explained(
                                             _y, __preds)
-                                        if metrics['ks_results'][_response][ix] is None:
-                                            metrics['ks_results'][_response][ix] = (np.zeros((T, K)), np.zeros((T, K)))
-                                        metrics['ks_results'][_response][ix][0][t, k] = D
-                                        metrics['ks_results'][_response][ix][1][t, k] = p_value
+                                        if ks_test:
+                                            if metrics['ks_results'][_response][ix] is None:
+                                                metrics['ks_results'][_response][ix] = (np.zeros((T, K)), np.zeros((T, K)))
+                                            metrics['ks_results'][_response][ix][0][t, k] = D
+                                            metrics['ks_results'][_response][ix][1][t, k] = p_value
                                     else:
                                         error = __preds = None
                     else:
