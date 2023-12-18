@@ -6890,6 +6890,7 @@ class CDRModel(object):
         """
 
         self.session.close()
+        tf.reset_default_graph()
 
     def set_predict_mode(self, mode):
         """
@@ -7262,23 +7263,26 @@ class CDRModel(object):
             n_time_points=1000
         )
 
-        formatters = {
-            'IRF': left_justified_formatter(irf_integrals, 'IRF')
-        }
+        out = ''
 
-        out = ' ' * indent + 'IRF INTEGRALS (EFFECT SIZES):\n'
-        out += ' ' * (indent + 2) + 'Integral upper bound (time): %s\n\n' % integral_n_time_units
+        if len(irf_integrals):
+            formatters = {
+                'IRF': left_justified_formatter(irf_integrals, 'IRF')
+            }
 
-        ci_str = irf_integrals.to_string(
-            index=False,
-            justify='left',
-            formatters=formatters
-        )
+            out += ' ' * indent + 'IRF INTEGRALS (EFFECT SIZES):\n'
+            out += ' ' * (indent + 2) + 'Integral upper bound (time): %s\n\n' % integral_n_time_units
 
-        for line in ci_str.splitlines():
-            out += ' ' * (indent + 2) + line + '\n'
+            ci_str = irf_integrals.to_string(
+                index=False,
+                justify='left',
+                formatters=formatters
+            )
 
-        out += '\n'
+            for line in ci_str.splitlines():
+                out += ' ' * (indent + 2) + line + '\n'
+
+            out += '\n'
 
         return out
 
@@ -8878,6 +8882,7 @@ class CDRModel(object):
             n_samples=None,
             algorithm='MAP',
             return_preds=None,
+            ks_test=False,
             sum_outputs_along_T=True,
             sum_outputs_along_K=True,
             dump=False,
@@ -8909,6 +8914,7 @@ class CDRModel(object):
         :param n_samples: ``int`` or ``None``; number of posterior samples to draw if Bayesian, ignored otherwise. If ``None``, use model defaults.
         :param algorithm: ``str``; algorithm to use for extracting predictions, one of [``MAP``, ``sampling``].
         :param return_preds: ``bool``; whether to return predictions as well as likelihoods. If ``None``, defaults are chosen based on response distribution(s).
+        :param ks_test: ``bool``; whether to return results of a Kolmogorov-Smirnov test between empirical and modeled data distributions.
         :param sum_outputs_along_T: ``bool``; whether to sum IRF-weighted predictors along the time dimension. Must be ``True`` for valid convolution. Setting to ``False`` is useful for timestep-specific evaluation.
         :param sum_outputs_along_K: ``bool``; whether to sum IRF-weighted predictors along the predictor dimension. Must be ``True`` for valid convolution. Setting to ``False`` is useful for impulse-specific evaluation.
         :param dump: ``bool``; whether to save generated data and evaluations to disk.
@@ -9084,14 +9090,15 @@ class CDRModel(object):
                                         error = np.array(_y - __preds) ** 2
                                         score = error.mean()
                                         resid = np.sort(_y - __preds)
-                                        if self.error_distribution_theoretical_quantiles[_response] is None:
-                                            resid_theoretical_q = None
-                                        else:
-                                            resid_theoretical_q = self.error_theoretical_quantiles(len(resid), _response)
-                                            valid = np.isfinite(resid_theoretical_q)
-                                            resid = resid[valid]
-                                            resid_theoretical_q = resid_theoretical_q[valid]
-                                        D, p_value = self.error_ks_test(resid, _response)
+                                        if ks_test:
+                                            if self.error_distribution_theoretical_quantiles[_response] is None:
+                                                resid_theoretical_q = None
+                                            else:
+                                                resid_theoretical_q = self.error_theoretical_quantiles(len(resid), _response)
+                                                valid = np.isfinite(resid_theoretical_q)
+                                                resid = resid[valid]
+                                                resid_theoretical_q = resid_theoretical_q[valid]
+                                            D, p_value = self.error_ks_test(resid, _response)
     
                                         if metrics['mse'][_response][ix] is None:
                                             metrics['mse'][_response][ix] = np.zeros((T, K))
@@ -10216,7 +10223,8 @@ class CDRModel(object):
                 step_size.append(steps)
             delta = self.plot_step_map[x]
             manipulations.append({x: delta})
-        step_size = np.stack(step_size, axis=1)[None, ...] # Add sample dim
+        if len(step_size):
+            step_size = np.stack(step_size, axis=1)[None, ...] # Add sample dim
 
         if random:
             ranef_group_names = self.ranef_group_names
@@ -10569,9 +10577,7 @@ class CDRModel(object):
         # IRF 1D
         if generate_univariate_irf_plots or generate_univariate_irf_heatmaps:
             names = self.impulse_names
-            has_rate = 'rate' in names
-            if has_rate:
-                names = [x for x in names if not self.has_nn_irf or x != 'rate']
+            names = [x for x in names if not (self.has_nn_irf and x == 'rate')]
             if not plot_dirac:
                 names = [x for x in names if self.is_non_dirac(x)]
             if pred_names is not None and len(pred_names) > 0:
@@ -10581,6 +10587,7 @@ class CDRModel(object):
                         if ID == name or re.match(ID if ID.endswith('$') else ID + '$', name) is not None:
                             new_names.append(name)
                 names = new_names
+            has_rate = 'rate' in names
 
             plot_step_map = self.get_plot_step_map(
                 plot_step,
@@ -10644,8 +10651,6 @@ class CDRModel(object):
 
                 for _response in plot_y:
                     for _dim_name in plot_y[_response]:
-                        param_names = self.get_response_params(_response)
-
                         include_param_name = True
 
                         plot_name = 'irf_univariate_%s' % sn(_response)
@@ -10676,10 +10681,15 @@ class CDRModel(object):
                         _lq = None if lq is None else lq[_response][_dim_name]
                         _uq = None if uq is None else uq[_response][_dim_name]
 
-                        if not self.has_nn_irf or not has_rate:
+                        if not (self.has_nn_irf and has_rate):
                             _plot_y = _plot_y[..., 1:]
                             _lq = None if _lq is None else _lq[..., 1:]
                             _uq = None if _uq is None else _uq[..., 1:]
+
+                        assert _plot_y.shape[-1] == len(names_cur), 'Mismatch between the number of impulse names ' + \
+                                                                    'and the number of plot dimensions. Got %d ' + \
+                                                                    'impulse names and %d plot dimensions.' % \
+                                                                    (len(names_cur), _plot_y.shape[-1])
 
                         if generate_univariate_irf_plots:
                             plot_irf(
@@ -10805,6 +10815,9 @@ class CDRModel(object):
                                 [name],
                                 lq=None if _lq is None else _lq[:, g:g + 1],
                                 uq=None if _uq is None else _uq[:, g:g + 1],
+                                sort_names=sort_names,
+                                prop_cycle_length=prop_cycle_length,
+                                prop_cycle_map=prop_cycle_map,
                                 outdir=self.outdir,
                                 filename=filename,
                                 irf_name_map=irf_name_map,

@@ -460,9 +460,6 @@ def build_CDR_impulse_data(
     :return: triple of ``numpy`` arrays; let N, T, I, R respectively be the number of rows in **Y**, history length, number of impulse dimensions, and number of response dimensions. Outputs are (1) impulses with shape (N, T, I), (2) impulse timestamps with shape (N, T, I), and impulse mask with shape (N, T, I).
     """
 
-    # if not (impulse_names):  # Empty (intercept-only) model
-    #     impulse_names = ['time']
-
     # Process impulses
 
     if X_in_Y_names is None:

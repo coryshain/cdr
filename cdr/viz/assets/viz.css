@@ -160,3 +160,9 @@ select:focus {
     width: 2px;
     border-radius: 15px;
 }
+
+#add-manipulation-button {
+    width=100%;
+    display: inline-block;
+}
+

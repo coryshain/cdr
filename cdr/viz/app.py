@@ -1,11 +1,13 @@
 import argparse
 import numpy as np
 import plotly.graph_objects as go
-import plotly.io as pio
+import plotly.express as px
+import plotly.colors
 import dash
-from dash import dcc
-from dash import html
+from dash import dcc, html, dash_table, ALL, MATCH, Patch
 from dash.dependencies import Input, Output, State
+from dash.exceptions import PreventUpdate
+
 import base64
 
 from cdr.config import Config
@@ -19,6 +21,9 @@ PLOT_HEIGHT = 6
 PLOT_DPI = 300
 SCREEN_DPI = 72
 
+
+def hex_to_rgb(h):
+    return tuple(int(h[i:i + 2], 16) for i in (1, 3, 5))
 
 def get_resparams(model, response):
     resparams = []
@@ -48,6 +53,9 @@ def get_surface_colorscale(z, eps=1e-5):
     else:
         upper_c = blue * (-upper_p) + gray * (1 + upper_p)
 
+    lower_c = np.round(lower_c).astype(int)
+    upper_c = np.round(upper_c).astype(int)
+
     colorscale = [
         [0., 'rgb(%s, %s, %s)' % tuple(lower_c)],
         [1., 'rgb(%s, %s, %s)' % tuple(upper_c)],
@@ -64,8 +72,6 @@ def initialize_app():
     app = dash.Dash(__name__)
     app.scripts.config.serve_locally = True
     app.config['suppress_callback_exceptions'] = True
-    app_name = 'CDR Viewer'
-    app_title = 'CDR Viewer'
     app.layout = layout()
 
     assign_callbacks(app)
@@ -99,7 +105,7 @@ def viewport_layout():
         config=dict(
             editable=True,
             displaylogo=False,
-            modeBarButtonsToRemove=['resetCameraDefault3d'],
+            # modeBarButtonsToRemove=['resetCameraDefault3d'],
             toImageButtonOptions=dict(
                 format='png',
                 filename='cdr_plot',
@@ -141,6 +147,7 @@ def side_panel_layout():
                         id='cdrnn-settings-inner',
                         children=[
                             layout_plot_definition_menu(),
+                            layout_manipulations_menu(),
                             layout_reference_values_menu(),
                             layout_uncertainty_menu(),
                             layout_axis_bounds(),
@@ -157,6 +164,12 @@ def side_panel_layout():
 def layout_plot_definition_menu():
     xy_axis_options = model.impulse_names + ['t_delta', 'X_time']
     response_options = model.response_names
+    default_response_params = get_resparams(model, response_options[0])
+    if 'mean' in default_response_params:
+        default_response_param = 'mean'
+    else:
+        default_response_param = default_response_params[0]
+    default_response_param = model.expand_param_name(response_options[0], default_response_param)[0]
 
     return html.Div(
         title='Plot Definition',
@@ -191,7 +204,7 @@ def layout_plot_definition_menu():
                                 id='dropdown_y',
                                 options=[{'label': get_irf_name(i, model.irf_name_map), 'value': i} for
                                          i in xy_axis_options],
-                                value=xy_axis_options[0],
+                                value=None,
                                 clearable=True
                             )
                         ]
@@ -215,9 +228,7 @@ def layout_plot_definition_menu():
                                 id='dropdown_resparams',
                                 options=[{'label': x, 'value': x} for x in
                                          get_resparams(model, response_options[0])],
-                                value=model.expand_param_name(response_options[0],
-                                                              model.get_response_params(
-                                                                  response_options[0])[0])[0],
+                                value=default_response_param,
                                 clearable=False
                             )
                         ]
@@ -232,7 +243,7 @@ def layout_plot_definition_menu():
                                     {'label': 'Pair manipulations', 'value': 'pair_manipulations'},
                                     {'label': 'Include interactions', 'value': 'include_interactions'}
                                 ],
-                                value=['ref_varies_with_x', 'pair_manipulations']
+                                value=['ref_varies_with_x']
                             )
                         ]
                     )
@@ -250,22 +261,67 @@ def layout_manipulations_menu():
             className='fullwidth-app-controls-name-text'
         )
     )
-    manipulations_settings = [
 
+    children=[
+         html.Button('+', id='add-manipulation-set-button', n_clicks=0),
+         html.Button('2D Default', id='2d-default-button', n_clicks=0),
+         html.Button('Clear', id='clear-manipulation-sets-button', n_clicks=0)
     ]
+    manipulation_sets, nsets = get_2d_default_manipulation_sets(0)
+    children += manipulation_sets
+
+    manipulations_container = html.Div(
+        className='fullwidth-app-controls',
+        id='manipulations-container',
+        children=children,
+        **{'data-nsets': nsets}
+    )
 
     return html.Div(
         title='Manipulations',
         className='app-controls-block',
+        id='manipulations',
         children=[
             panel_name,
-            html.Div(
-                className='fullwidth-app-controls',
-                id='manipulations-container',
-                children=manipulations_settings
-            )
+            manipulations_container
         ]
     )
+
+
+def get_new_manipulation_set(set_id, default_option=None, default_value=None):
+    options = model.impulse_names
+    if default_option is None:
+        default_option = options[0]
+    if default_value is None:
+        default_value = model.plot_step_default
+    options = [{'label': get_irf_name(x, model.irf_name_map), 'value': x} for x in options]
+    table = dash_table.DataTable(
+        columns=[
+            {'id': 'Variable', 'name': 'Variable', 'presentation': 'dropdown'},
+            {'id': 'Value', 'name': 'Value'},
+        ],
+        data=[{'Variable': default_option, 'Value': default_value}],
+        editable=True,
+        dropdown={
+            'Variable': {
+                'options': options
+            }
+        },
+        id={'type': 'manipulation-set', 'index': set_id}
+    )
+
+    return table
+
+
+def get_2d_default_manipulation_sets(start_id):
+    options = model.impulse_names
+    value = model.plot_step_default
+    children = []
+    for i, option in enumerate(options):
+        children.append(
+            get_new_manipulation_set(i + start_id, default_option=option, default_value=value)
+        )
+    return children, start_id + i
 
 
 def layout_reference_values_menu():
@@ -664,6 +720,64 @@ def layout_save_menu():
 
 
 def assign_callbacks(_app):
+    # Manipulation editor
+    @_app.callback(
+        [Output('manipulations-container', 'children', allow_duplicate=True),
+        Output('manipulations-container', 'data-nsets', allow_duplicate=True)],
+        Input('add-manipulation-set-button', 'n_clicks'),
+        State('manipulations-container', 'children'),
+        State('manipulations-container', 'data-nsets'),
+        prevent_initial_call='initial_duplicate'
+    )
+    def add_manipulation_set(n_clicks, children, nsets):
+        if n_clicks:
+            if not children:
+                children = []
+            nsets += 1
+            child = get_new_manipulation_set(nsets)
+
+            children.append(child)
+        else:
+            raise PreventUpdate
+
+        return [children, nsets]
+
+    @_app.callback(
+        [Output('manipulations-container', 'children', allow_duplicate=True),
+        Output('manipulations-container', 'data-nsets')],
+        Input('2d-default-button', 'n_clicks'),
+        State('manipulations-container', 'children'),
+        State('manipulations-container', 'data-nsets'),
+        prevent_initial_call='initial_duplicate'
+    )
+    def default_manipulations_2d(n_clicks, children, nsets):
+        if n_clicks:
+            manipulation_sets, endid = get_2d_default_manipulation_sets(nsets + 1)
+            children = children[:3] + manipulation_sets
+        else:
+            raise PreventUpdate
+
+        return [children, endid]
+
+    @_app.callback(
+        Output('manipulations-container', 'children', allow_duplicate=True),
+        Input('clear-manipulation-sets-button', 'n_clicks'),
+        State('manipulations-container', 'children'),
+        prevent_initial_call='initial_duplicate'
+    )
+    def clear_manipulation_sets(n_clicks, children):
+        if n_clicks:
+            children = [
+                 html.Button('+', id='add-manipulation-set-button', n_clicks=0),
+                 html.Button('2D Default', id='2d-default-button', n_clicks=0),
+                 html.Button('Clear', id='clear-manipulation-sets-button', n_clicks=0)
+            ]
+        else:
+            raise PreventUpdate
+
+        return children
+
+    # Main callback ("Update Plot" button)
     update_args = [
         Input('update-button', 'n_clicks'),
         State('graph', 'relayoutData'),
@@ -687,7 +801,8 @@ def assign_callbacks(_app):
         State('xlab', 'value'),
         State('ylab', 'value'),
         State('zlab', 'value'),
-        State('aes-plot-switches', 'value')
+        State('aes-plot-switches', 'value'),
+        State({'type': 'manipulation-set', 'index': ALL}, 'data')
     ]
     for x in model.impulse_names + model.rangf:
         update_args.append(State('%s-reference' % x.replace('.', '_'), 'value'))
@@ -706,7 +821,28 @@ def assign_callbacks(_app):
     def update_graph(
             *args
     ):
-        kwargs = dict(zip([x.component_id for x in update_args], args))
+        kwargs = {}
+        manipulation_sets = []
+        for x, y in zip(update_args, args):
+            id = x.component_id
+            if isinstance(id, str):
+                kwargs[id] = y
+            elif id['type'] == 'manipulation-set':
+                manipulation_sets = y
+        manipulations = []
+        for x in manipulation_sets:
+            manipulation = {}
+            for y in x:
+                variable, value = y['Variable'], y['Value']
+                try:
+                    value = float(value)
+                except ValueError:
+                    pass
+                manipulation[variable] = value
+            manipulations.append(manipulation)
+        if not manipulations:
+            manipulations=None
+
         n_clicks = kwargs['update-button']
         relayout_data = kwargs['graph']
         xvar = kwargs['dropdown_x']
@@ -776,20 +912,23 @@ def assign_callbacks(_app):
             xlab = get_irf_name(xvar, model.irf_name_map)
         if ylab is None:
             if yvar is None:
-                ylab = get_irf_name(response, model.irf_name_map) + ", " + resparam
+                ylab = get_irf_name(response, model.irf_name_map)
+                if resparam != 'mean':
+                    ylab += ", " + resparam
             else:
                 ylab = get_irf_name(yvar, model.irf_name_map)
         if zlab is None:
             zlab = get_irf_name(response, model.irf_name_map) + ", " + resparam
 
         try:
-            plot_data = model.get_plot_data(
+            plot_x, plot_y, lq, uq, _ = model.get_plot_data(
                 ref_varies_with_x=ref_varies_with_x,
                 ref_varies_with_y=ref_varies_with_y,
                 xvar=xvar,
                 yvar=yvar,
                 responses=response,
                 response_params=resparam,
+                manipulations=manipulations,
                 X_ref=X_ref,
                 X_time_ref=X_time_ref,
                 t_delta_ref=t_delta_ref,
@@ -805,37 +944,71 @@ def assign_callbacks(_app):
             )
 
             if yvar is None:  # 2D plot
-                x2d = plot_data[0]
-                d2d = plot_data[1]
-                y2d = d2d[response][resparam]
-                y2d_splice = y2d[..., 0]
-                y_lower = plot_data[2][response][resparam][..., 0]
-                y_upper = plot_data[3][response][resparam][..., 0]
-                fig = go.Figure(data=[
-                    go.Scatter(x=x2d, y=y2d_splice, marker=dict(color='blue'), mode='lines'),
-                    go.Scatter(
-                        name='Upper Bound',
-                        x=x2d,
-                        y=y_upper,
-                        mode='lines',
-                        line=dict(width=0),
-                        showlegend=False
-                    ),
-                    go.Scatter(
-                        name='Lower Bound',
-                        x=x2d,
-                        y=y_lower,
-                        line=dict(width=0),
-                        mode='lines',
-                        fillcolor='rgba(0, 0, 255, 0.2)',
-                        fill='tonexty',
-                        showlegend=False
-                    )
-                ])
+                x2d = plot_x
+                y2d = plot_y[response][resparam]
+                lq = lq[response][resparam]
+                uq = uq[response][resparam]
+
+                y2d_baseline, y2d = y2d[..., :1], y2d[..., 1:]
+                lq_baseline, lq = lq[..., :1], lq[..., 1:]
+                uq_baseline, uq = uq[..., :1], uq[..., 1:]
+
+                fig = go.Figure()
+                colors = px.colors.qualitative.Light24
+                for i in range(y2d.shape[-1]):
+                    _y2d = y2d[..., i]
+                    _lq = lq[..., i]
+                    _uq = uq[..., i]
+
+                    variables = list(manipulations[i].keys())
+                    if variables == ['rate']:
+                        name = 'Rate'
+                    else:
+                        keys = list(manipulations[i].keys())
+                        if len(keys) == 1 and manipulations[i][keys[0]]  in (1, 'sd'):
+                            name = keys[0]
+                        else:
+                            name = ', '.join(['%s += %s' % (x, manipulations[i][x]) for x in manipulations[i]])
+
+                    color = hex_to_rgb(colors[i])
+                    color_a = 'rgba(%d, %d, %d, 0.1)' % color
+                    color = 'rgb(%s, %s, %s)' % color
+
+                    fig.add_traces([
+                        go.Scatter(
+                            x=x2d,
+                            y=_y2d,
+                            marker=dict(color=color),
+                            mode='lines',
+                            name=name
+                        ),
+                        go.Scatter(
+                            name='Upper Bound',
+                            x=x2d,
+                            y=_uq,
+                            mode='lines',
+                            line=dict(width=0),
+                            # line=dict(width=1, dash='dot', color=color),
+                            showlegend=False
+                        ),
+                        go.Scatter(
+                            name='Lower Bound',
+                            x=x2d,
+                            y=_lq,
+                            line=dict(width=0),
+                            # line=dict(width=1, dash='dot', color=color),
+                            mode='lines',
+                            fillcolor=color_a,
+                            opacity=0.05,
+                            fill='tonexty',
+                            showlegend=False
+                        )
+                    ])
 
                 if xmin is not None and xmax is not None:
                     fig.update_xaxes(range=[xmin, xmax])
                 fig.update_layout(
+                    template='plotly_white',
                     font_family='Helvetica',
                     title_font_family='Helvetica',
                     title=plot_title,
@@ -849,10 +1022,10 @@ def assign_callbacks(_app):
             else:  # 3D plot
                 zmin = zmin
                 zmax = zmax
-                x, y = plot_data[0]
-                z = plot_data[1][response][resparam]
-                z_lower = plot_data[2][response][resparam]
-                z_upper = plot_data[3][response][resparam]
+                x, y = plot_x
+                z = plot_y[response][resparam]
+                z_lower = lq[response][resparam]
+                z_upper = uq[response][resparam]
 
                 fig = go.Figure()
                 traces = []
@@ -945,11 +1118,13 @@ def assign_callbacks(_app):
                     margin=dict(r=20, l=20, b=20, t=20),
                     showlegend=False
                 )
-                if False and n_clicks == 0:
+                if relayout_data is not None and 'scene.camera' in relayout_data:
+                    layout_kwargs['scene_camera'] = relayout_data['scene.camera']
+                else:
                     layout_kwargs['scene_camera'] = dict(
                         up=dict(x=0, y=0, z=1),
                         center=dict(x=0, y=0, z=0),
-                        eye=dict(x=1.25, y=-1.25, z=1)
+                        eye=dict(x=-1.25, y=-1.25, z=1)
                     )
 
                 fig.update_layout(**layout_kwargs)
