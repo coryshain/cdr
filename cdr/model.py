@@ -10578,7 +10578,6 @@ class CDRModel(object):
         # IRF 1D
         if generate_univariate_irf_plots or generate_univariate_irf_heatmaps:
             names = self.impulse_names
-            names = [x for x in names if not (self.has_nn_irf and x == 'rate')]
             if not plot_dirac:
                 names = [x for x in names if self.is_non_dirac(x)]
             if pred_names is not None and len(pred_names) > 0:
@@ -10589,6 +10588,7 @@ class CDRModel(object):
                             new_names.append(name)
                 names = new_names
             has_rate = 'rate' in names
+            names = [x for x in names if not (self.has_nn_irf and x == 'rate')]
 
             plot_step_map = self.get_plot_step_map(
                 plot_step,
