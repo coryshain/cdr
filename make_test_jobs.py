@@ -1,4 +1,5 @@
 import sys
+import argparse
 
 base = """#!/bin/bash
 #
@@ -9,7 +10,9 @@ base = """#!/bin/bash
 #SBATCH --ntasks=4
 """
 
-wrapper = '\nsingularity exec --nv ../singularity_images/tf-latest-gpu.simg bash -c "cd /net/vast-storage.ib.cluster/scratch/vast/evlab/cshain/cdr_surp_lin; %s"' # REPLACE THESE PATHS
+# Wrapper is useful for running in singularity environments (you'll have to change the path to the image).
+# If not using singularity, set wrapper to '%s' (no-op)
+wrapper = '\nsingularity exec --nv ../singularity_images/tf-latest-gpu.simg bash -c "%s"' # REPLACE THESE PATHS
 
 datasets = [
   'brown.fdur',
@@ -111,109 +114,57 @@ for m in ['gpt']:
 
 comparisons = comparisons_nosurp + comparisons_fn + comparisons_composite + comparisons_model + comparisons_surpproblin + comparisons_dist
 
-for dataset in datasets:
-    for comparison in comparisons:
-        if dataset.startswith('provo') or 'cloze' not in comparison:
+if __name__ == '__main__':
+    argparser = argparse.ArgumentParser('Generate SLURM batch scripts for permutation tests')
+    argparser.add_argument('-r', '--results_path', default='results', help='Path to directory containing modeling results')
+    args = argparser.parse_args()
+    results_path = args.results_path
+    
+    # Main analyses
+    for dataset in datasets:
+        for comparison in comparisons:
+            if dataset.startswith('provo') or 'cloze' not in comparison:
+                job_name = '%s_%s_test' % (dataset, comparison)
+                job_str = 'python3 test_surp_lin.py %s %s -r %s' % (dataset, comparison, results_path)
+                job_str = wrapper % job_str
+                job_str = base % (job_name, job_name) + job_str
+                with open(job_name + '.pbs', 'w') as f:
+                    f.write(job_str)
+    
+    # Normal error
+    model = 'gpt'
+    for dataset in datasets_normal:
+        for comparison in comparisons_nosurp_normal + comparisons_fn_normal + comparisons_composite_normal:
             job_name = '%s_%s_test' % (dataset, comparison)
-            job_str = 'python3 test_surp_lin.py %s %s' % (dataset, comparison)
+            job_str = 'python3 test_surp_lin.py %s %s -r %s' % (dataset, comparison, results_path)
             job_str = wrapper % job_str
             job_str = base % (job_name, job_name) + job_str
             with open(job_name + '.pbs', 'w') as f:
                 f.write(job_str)
-
-model = 'gpt'
-for dataset in datasets_normal:
-    for comparison in comparisons_nosurp_normal + comparisons_fn_normal + comparisons_composite_normal:
-        job_name = '%s_%s_test' % (dataset, comparison)
-        job_str = 'python3 test_surp_lin.py %s %s' % (dataset, comparison)
-        job_str = wrapper % job_str
-        job_str = base % (job_name, job_name) + job_str
-        with open(job_name + '.pbs', 'w') as f:
-            f.write(job_str)
-        
-
-# if len(sys.argv) > 1:
-#     partition = sys.argv[1]
-# else:
-#     partition = 'dev'
-# 
-# models = ('prob_h0', '0.50_h0', '0.75_h0', '1.00_h0', '1.33_h0', '2.00_h0', '')
-# for cfg in ('all', 'brown.ini', 'dundee.ini', 'geco.ini', 'natstor.ini', 'natstormaze.ini', 'provo.ini'):
-#     dataset = cfg.replace('.ini', '')
-#     cliargs = ' -o ../results/surp_lin/signif/%s' % dataset
-#     if cfg == 'all':
-#         cfg = '{brown,dundee,geco,natstor,natstormaze,provo}.ini'
-#         cliargs += ' -P'
-#     for comp in [
-#         ('cloze', 'pcfg'),
-#         ('cloze', 'ngram'),
-#         ('cloze', 'gpt'),
-#         ('cloze', 'gptj'),
-#         ('cloze', 'gpt3'),
-#         ('pcfg', 'ngram'),
-#         ('pcfg', 'gpt'),
-#         ('pcfg', 'gptj'),
-#         ('pcfg', 'gpt3'),
-#         ('ngram', 'gpt'),
-#         ('ngram', 'gptj'),
-#         ('ngram', 'gpt3'),
-#         ('gpt', 'gptj'),
-#         ('gpt', 'gpt3'),
-#         ('gptj', 'gpt3'),
-#         ('gpt', 'gptpcfg'),
-#         ('gptprob_h0', 'gptsurpproblin'),
-#         ('gpt1.00_h0', 'gptsurpproblin'),
-#     ]:
-#         if cfg.startswith('provo') or 'cloze' not in comp:
-#             a, b = comp
-#             job_name = '%s_%s_v_%s_test' % (dataset, a, b)
-#             job_str = 'python3 -m cdr.bin.test ini/%s -m CDR_%s CDR_%s -M loglik -p %s%s' % (cfg, a, b, partition, cliargs)
-#             job_str = wrapper % job_str
-#             job_str = base % (job_name, job_name) + job_str
-#             with open(job_name + '.pbs', 'w') as f:
-#                 f.write(job_str)
-#         
-#     for surp in ('ngram', 'pcfg', 'gpt', 'gptj', 'gpt3', 'cloze'):
-#         if cfg.startswith('provo') or surp != 'cloze':
-#             for i in range(len(models)):
-#                 suff1 = models[i]
-#                 job_name = '%s_nosurp_v_%s%s_test' % (dataset, surp, suff1)
-#                 job_str = 'python3 -m cdr.bin.test ini/%s -m CDR_nosurp CDR_%s%s -M loglik -p %s%s' % (cfg, surp, suff1, partition, cliargs)
-#                 job_str = wrapper % job_str
-#                 job_str = base % (job_name, job_name) + job_str
-#                 with open(job_name + '.pbs', 'w') as f:
-#                     f.write(job_str)
-#                 for j in range(i+1, len(models)):
-#                     suff2 = models[j]
-#                     job_name = '%s_%s%s_v_%s%s_test' % (dataset, surp, suff1, surp, suff2)
-#                     job_str = 'python3 -m cdr.bin.test ini/%s -m CDR_%s%s CDR_%s%s -M loglik -p %s%s' % (cfg, surp, suff1, surp, suff2, partition, cliargs)
-#                     job_str = wrapper % job_str
-#                     job_str = base % (job_name, job_name) + job_str
-#                     with open(job_name + '.pbs', 'w') as f:
-#                         f.write(job_str)
-#     
-# # Normal error models
-# for cfg in ('all_normal', 'brown_normal.ini', 'dundee_normal.ini', 'geco_normal.ini', 'natstor_normal.ini', 'natstormaze_normal.ini', 'provo_normal.ini'):
-#     dataset = cfg.replace('.ini', '')
-#     cliargs = ' -o ../results/surp_lin/signif/%s' % dataset
-#     if cfg == 'all':
-#         cfg = '{brown,dundee,geco,natstor,natstormaze,provo}_normal.ini'
-#         cliargs += ' -P'
-#     for surp in ('gpt',):
-#         for i in range(len(models)):
-#             suff1 = models[i]
-#             job_name = '%s_nosurp_v_%s%s_test' % (dataset, surp, suff1)
-#             job_str = 'python3 -m cdr.bin.test ini/%s -m CDR_nosurp CDR_%s%s -M loglik -p %s%s' % (cfg, surp, suff1, partition, cliargs)
-#             job_str = wrapper % job_str
-#             job_str = base % (job_name, job_name) + job_str
-#             with open(job_name + '.pbs', 'w') as f:
-#                 f.write(job_str)
-#             for j in range(i+1, len(models)):
-#                 suff2 = models[j]
-#                 job_name = '%s_%s%s_v_%s%s_test' % (dataset, surp, suff1, surp, suff2)
-#                 job_str = 'python3 -m cdr.bin.test ini/%s -m CDR_%s%s CDR_%s%s -M loglik -p %s' % (cfg, surp, suff1, surp, suff2, partition)
-#                 job_str = wrapper % job_str
-#                 job_str = base % (job_name, job_name) + job_str
-#                 with open(job_name + '.pbs', 'w') as f:
-#                     f.write(job_str)
-#  
+            
+    # Word skipping
+    model = 'gpt'
+    comparisons_skip = []
+    functions = [
+        'prob',
+        '1.00',
+        '',
+    ]
+    for model in ['gpt']:
+        for fn in functions:
+            s = 'nosurp_v_%s%s' % (model, fn)
+            comparisons_skip.append(s)
+    for i, fn1 in enumerate(functions):
+        for model in ['gpt']:
+            if i < len(functions) - 1:
+                for fn2 in functions[i+1:]:
+                    s = '%s%s_v_%s%s' % (model, fn1, model, fn2)
+                    comparisons_skip.append(s)
+    for dataset in datasets_skip:
+        for comparison in comparisons_skip:
+            job_name = '%s_%s_test' % (dataset, comparison)
+            job_str = 'python3 test_surp_lin_curr.py %s %s -r %s' % (dataset, comparison, results_path)
+            job_str = wrapper % job_str
+            job_str = base % (job_name, job_name) + job_str
+            with open(job_name + '.pbs', 'w') as f:
+                f.write(job_str)
