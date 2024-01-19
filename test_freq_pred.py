@@ -27,17 +27,27 @@ RESPONSE_MAP = {
     'provo':              ['fdurSPsummed', 'fdurFP', 'fdurGP'],
 }
 
-results_path = 'results'
 
 if __name__ == '__main__':
     argparser = argparse.ArgumentParser('''Run extra signif tests for the CDRNN surprisal study''')
     argparser.add_argument('dataset', help='Name of dataset to test on, one of <all,brown.fdur,dundee.{fdurSPsummed,fdurFP,fdurGP},geco.{fdurFP,fdurGP},natstor.{fdur},natstormaze.{rt},provo.{fdurSPsummed,fdurFP,fdurGP}>')
     argparser.add_argument('test_name', help='Name of test to run. Format: MODELA_v_MODELB')
+    argparser.add_argument('-c', '--cutoff95', action='store_true', help='Run on cutoff95 models. Otherwise run in main models.')
     argparser.add_argument('-f', '--force', action='store_true', help='Re-run test even if results already exist. Otherwise, finished tests will be skipped.')
     args = argparser.parse_args()
 
     dataset = args.dataset
     test_name = args.test_name
+    cutoff95 = args.cutoff95
+
+    assert os.path.exists('config.yml'), 'Repository has not yet been initialized. First run `python -m initialize`.'
+    with open('config.yml', 'r') as f:
+        repo_cfg = yaml.load(f, Loader=Loader)
+    
+    results_path = repo_cfg['results_path']
+    if cutoff95:
+        results_path += '_cutoff95'
+    results_path += '/'
 
     a_name, b_name = test_name.split('_v_')
 
@@ -83,7 +93,7 @@ if __name__ == '__main__':
     assert len(a) == len(b), 'Length mismatch: %s vs. %s' % (len(a), len(b))
 
     name = test_name
-    outdir = '%s/signif/%s' % (results_path, dataset)
+    outdir = os.path.join(results_path, 'signif/%s' % dataset)
     if len(responses) == 1:
         response_name = list(responses)[0]
     else:

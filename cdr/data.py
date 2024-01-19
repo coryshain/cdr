@@ -460,9 +460,6 @@ def build_CDR_impulse_data(
     :return: triple of ``numpy`` arrays; let N, T, I, R respectively be the number of rows in **Y**, history length, number of impulse dimensions, and number of response dimensions. Outputs are (1) impulses with shape (N, T, I), (2) impulse timestamps with shape (N, T, I), and impulse mask with shape (N, T, I).
     """
 
-    if not (impulse_names):  # Empty (intercept-only) model
-        impulse_names = ['time']
-
     # Process impulses
 
     if X_in_Y_names is None:
@@ -492,9 +489,13 @@ def build_CDR_impulse_data(
                 int_type=int_type,
                 float_type=float_type
             )
-            X_2d.append(_X_2d)
-            X_time_out.append(_X_time_2d)
-            X_mask_out.append(_X_mask)
+        else:
+            _X_2d = np.zeros((len(first_obs[i]), window_length, 0))
+            _X_time_2d = np.zeros_like(_X_2d)
+            _X_mask = np.zeros_like(_X_2d)
+        X_2d.append(_X_2d)
+        X_time_out.append(_X_time_2d)
+        X_mask_out.append(_X_mask)
 
     assert len(impulse_names_X_todo) == 0, 'Not all impulses were processed during CDR data array construction. Remaining impulses: %s' % impulse_names_X_todo
     impulse_names_X = impulse_names_X_tmp
@@ -506,7 +507,14 @@ def build_CDR_impulse_data(
 
     if X_in_Y_names:
         assert X_in_Y is not None, 'X_in_Y must be provided if X_in_Y_names is not ``None``.'
-        X_in_Y_shape = (X_out.shape[0], X_out.shape[1], len(X_in_Y_names))
+        if len(impulse_names_X):
+            T = X_out.shape[1]
+        else:
+            T = 1
+            X_out = X_out[:, :T]
+            X_time_out = X_time_out[:, :T]
+            X_mask_out = X_mask_out[:, :T]
+        X_in_Y_shape = (X_out.shape[0], T, len(X_in_Y_names))
         _X_in_Y = np.zeros(X_in_Y_shape)
         _X_in_Y[:, -1, :] = X_in_Y[X_in_Y_names].values
         X_out = np.concatenate([X_out, _X_in_Y], axis=2)

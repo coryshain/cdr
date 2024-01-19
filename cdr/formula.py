@@ -1281,8 +1281,6 @@ class Formula(object):
         :return: ``numpy`` array; transformed data.
         """
 
-        arr.fillna(0, inplace=True)
-        arr[arr == np.inf] = 0
         if op in ['c', 'c.']:
             out = c(arr)
         elif op in ['z', 'z.']:

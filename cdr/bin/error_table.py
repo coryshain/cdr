@@ -109,7 +109,9 @@ if __name__ == '__main__':
         metric = 'MSE'
     elif args.metric.lower() in ['loglik', 'll', 'likelihood']:
         metric = 'Loglik'
-    elif args.metric.lower() in ['r', 'r2']:
+    elif args.metric.lower() in ['r']:
+        metric = 'r(true, pred)'
+    elif args.metric.lower() in ['r2']:
         metric = '% var expl'
     elif args.metric.lower() in ['n', 'iter', 'niter', 'n_iter']:
         metric = 'Training iterations completed'

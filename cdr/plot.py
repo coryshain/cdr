@@ -35,10 +35,14 @@ def plot_irf(
         ylim=None,
         cmap='gist_rainbow',
         legend=True,
+        legend_above=True,
         xlab=None,
         ylab=None,
         use_line_markers=False,
         use_grid=True,
+        use_fill=True,
+        use_left_spine=False,
+        use_bottom_spine=True,
         transparent_background=False,
         dpi=300,
         dump_source=False
@@ -62,10 +66,12 @@ def plot_irf(
     :param ylim: 2-element ``tuple`` or ``list``; (lower_bound, upper_bound) to use for y axis. If ``None``, automatically inferred.
     :param cmap: ``str``; name of ``matplotlib`` ``cmap`` object (determines colors of plotted IRF).
     :param legend: ``bool``; include a legend.
+    :param legend_above: ``bool``; place legend above axis.
     :param xlab: ``str`` or ``None``; x-axis label. If ``None``, no label.
     :param ylab: ``str`` or ``None``; y-axis label. If ``None``, no label.
     :param use_line_markers: ``bool``; add markers to IRF lines.
     :param use_grid: ``bool``; whether to show a background grid.
+    :param use_fill: ``bool``; fill between the uncertainty bounds. If ``False``, use dotted outlines.
     :param transparent_background: ``bool``; use a transparent background. If ``False``, uses a white background.
     :param dpi: ``int``; dots per inch.
     :param dump_source: ``bool``; Whether to dump the plot source array to a csv file.
@@ -105,8 +111,10 @@ def plot_irf(
 
     ax.spines['top'].set_visible(False)
     ax.spines['right'].set_visible(False)
-    ax.spines['bottom'].set_visible(False)
-    ax.spines['left'].set_visible(False)
+    if not use_bottom_spine:
+        ax.spines['bottom'].set_visible(False)
+    if not use_left_spine:
+        ax.spines['left'].set_visible(False)
     ax.tick_params(top='off', bottom='off', left='off', right='off', labelleft='on', labelbottom='on')
     ax.xaxis.set_ticks_position('none')
     ax.yaxis.set_ticks_position('none')
@@ -130,16 +138,34 @@ def plot_irf(
         markevery = int(len(plot_y) / 10)
         ax.plot(plot_x, plot_y[:,sort_ix[i]], label=irf_names_processed[sort_ix[i]], lw=2, alpha=0.8, linestyle='-', markevery=markevery, markersize=12, solid_capstyle='butt')
         if uq is not None and lq is not None:
-            ax.fill_between(plot_x, lq[:,sort_ix[i]], uq[:,sort_ix[i]], alpha=0.25)
+            if use_fill:
+                ax.fill_between(plot_x, lq[:,sort_ix[i]], uq[:,sort_ix[i]], alpha=0.25)
+            else:
+                ax.plot(plot_x, lq[:,sort_ix[i]], lw=1, alpha=0.4, linestyle='dotted', solid_capstyle='butt', marker='', color=color_cycle[i])
+                ax.plot(plot_x, uq[:,sort_ix[i]], lw=1, alpha=0.4, linestyle='dotted', solid_capstyle='butt', marker='', color=color_cycle[i])
 
     if xlab:
-        xlab = get_irf_name(xlab, irf_name_map)
+        if irf_name_map is not None:
+            xlab = get_irf_name(xlab, irf_name_map)
         ax.set_xlabel(xlab)
     if ylab:
+        if irf_name_map is not None:
+            ylab = get_irf_name(ylab, irf_name_map)
         ax.set_ylabel(ylab)
 
     if legend:
-        ax.legend(fancybox=True, framealpha=0.75, frameon=True, facecolor='white', edgecolor='gray')
+        legend_kwargs = {
+            'fancybox': True,
+            'framealpha': 0.75,
+            'frameon': True,
+            'facecolor': 'white',
+            'edgecolor': 'gray'
+        }
+        if legend_above:
+            legend_kwargs['loc'] = 'lower center'
+            legend_kwargs['bbox_to_anchor'] = (0.5, 1)
+            legend_kwargs['frameon'] = False
+        ax.legend(**legend_kwargs)
 
     xlim = (plot_x.min(), plot_x.max())
     ax.set_xlim(xlim)

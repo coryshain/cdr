@@ -14,16 +14,13 @@ pd.options.mode.chained_assignment = None
 if __name__ == '__main__':
 
     argparser = argparse.ArgumentParser('''
-        Adds convolved columns to dataframe using pre-trained CDR model
+        Resample data from a fitted CDR posterior
     ''')
     argparser.add_argument('config_paths', nargs='+', help='Path(s) to configuration (*.ini) file')
     argparser.add_argument('-m', '--models', nargs='*', default=[], help='Path to configuration (*.ini) file')
     argparser.add_argument('-p', '--partition', nargs='+', default=['dev'], help='List of names of partitions to use ("train", "dev", "test", or a hyphen-delimited subset of these, or "PREDICTOR_PATH(;PREDICTOR_PATH):(RESPONSE_PATH;RESPONSE_PATH)").')
     argparser.add_argument('-r', '--response', nargs='+', default=None, help='Names of response variables to convolve toward. If ``None``, convolves toward all variables.')
-    argparser.add_argument('-P', '--response_param', nargs='+', default=None, help='Names of any parameters of predictive distribution(s) to convolve toward. If ``None``, convolves toward the first parameter of the predictive distribution for each resposne.')
     argparser.add_argument('-n', '--nsamples', type=int, default=None, help='Number of posterior samples to average (only used for CDRBayes)')
-    argparser.add_argument('-a', '--algorithm', type=str, default='MAP', help='Algorithm ("sampling" or "MAP") to use for extracting predictions.')
-    argparser.add_argument('-A', '--ablated_models', action='store_true', help='Perform convolution using ablated models. Otherwise only convolves using the full model in each ablation set.')
     argparser.add_argument('-e', '--extra_cols', action='store_true', help='Whether to include columns from the response dataframe in the outputs.')
     argparser.add_argument('-O', '--optimize_memory', action='store_true', help="Compute expanded impulse arrays on the fly rather than pre-computing. Can reduce memory consumption by orders of magnitude but adds computational overhead at each minibatch, slowing training (typically around 1.5-2x the unoptimized training time).")
     argparser.add_argument('--cpu_only', action='store_true', help='Use CPU implementation even if GPU is available.')
@@ -41,13 +38,6 @@ if __name__ == '__main__':
         cdr_formula_list = [Formula(p.models[m]['formula']) for m in filter_models(models, cdr_only=True)]
         cdr_models = [m for m in filter_models(models, cdr_only=True)]
 
-        if not args.ablated_models:
-            cdr_models_new = []
-            for model_name in cdr_models:
-                if len(model_name.split('!')) == 1: #No ablated variables, which are flagged with "!"
-                    cdr_models_new.append(model_name)
-            cdr_models = cdr_models_new
-
         evaluation_sets = []
         evaluation_set_partitions = []
         evaluation_set_names = []
@@ -56,7 +46,7 @@ if __name__ == '__main__':
         for i, p_name in enumerate(args.partition):
             partitions = get_partition_list(p_name)
             if ':' in p_name:
-                partition_str = '%d' % (i + 1)
+                partition_str = 'p%d' % (i + 1)
                 X_paths = partitions[0].split(';')
                 Y_paths = partitions[1].split(';')
             else:
@@ -67,8 +57,7 @@ if __name__ == '__main__':
                 Y_paths,
                 p.series_ids,
                 sep=p.sep,
-                categorical_columns=list(
-                    set(p.split_ids + p.series_ids + [v for x in cdr_formula_list for v in x.rangf]))
+                categorical_columns=list(set(p.split_ids + p.series_ids + [v for x in cdr_formula_list for v in x.rangf]))
             )
             X, Y, select, X_in_Y_names = preprocess_data(
                 X,
@@ -99,20 +88,15 @@ if __name__ == '__main__':
                 stderr('Retrieving saved model %s...\n' % m)
                 cdr_model = CDREnsemble(p.outdir, m_path)
 
-                if args.algorithm.lower() == 'map':
-                    cdr_model.set_weight_type('ll')
-                else:
-                    cdr_model.set_weight_type('uniform')
+                cdr_model.set_weight_type('uniform')
 
-                stderr('Convolving %s...\n' % m)
-                cdr_model.convolve_inputs(
+                stderr('Sampling %s...\n' % m)
+                cdr_model.sample(
                     X,
                     Y_valid,
                     X_in_Y_names=X_in_Y_names,
                     responses=args.response,
-                    response_params=args.response_param,
                     n_samples=args.nsamples,
-                    algorithm=args.algorithm,
                     extra_cols=args.extra_cols,
                     partition=partition_str,
                     optimize_memory=args.optimize_memory,

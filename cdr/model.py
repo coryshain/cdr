@@ -817,8 +817,12 @@ class CDRModel(object):
                 cov_blocks.append(block.cov().values)
                 names += list(block.columns)
             corr = scipy.linalg.block_diag(*corr_blocks)
+            if corr.shape == (1, 0):
+                corr = np.zeros((0, 0))
             corr = pd.DataFrame(corr, index=names, columns=names)
             cov = scipy.linalg.block_diag(*cov_blocks)
+            if cov.shape == (1, 0):
+                cov = np.zeros((0, 0))
             cov = pd.DataFrame(cov, index=names, columns=names)
             means = pd.DataFrame([self.impulse_means[x] for x in cov.index], index=cov.index, columns=['val'])
             self.impulse_corr = corr
@@ -1183,7 +1187,11 @@ class CDRModel(object):
         self.impulse_df_ix_unique = sorted(list(set(self.impulse_df_ix)))
         self.n_impulse_df = len(self.impulse_df_ix_unique)
         self.impulse_indices = []
-        for i in range(max(self.impulse_df_ix_unique) + 1):
+        if self.impulse_df_ix_unique:
+            max_impulse_df_ix_unique = max(self.impulse_df_ix_unique)
+        else:
+            max_impulse_df_ix_unique = 0
+        for i in range(max_impulse_df_ix_unique + 1):
             arange = np.arange(len(self.form.t.impulses(include_interactions=True)))
             ix = arange[np.where(self.impulse_df_ix == i)[0]]
             self.impulse_indices.append(ix)
@@ -1194,7 +1202,7 @@ class CDRModel(object):
             self.n_response_df = max(self.n_response_df, max(self.response_to_df_ix[_response]))
         self.n_response_df += 1
 
-        if self.impulse_sampler_means is None:
+        if self.impulse_sampler_means is None or not len(self.impulse_sampler_means):
             self.impulse_sampler = None
         else:
             self.impulse_sampler = scipy.stats.multivariate_normal(
@@ -1254,7 +1262,11 @@ class CDRModel(object):
         self.impulse_scale_arr_expanded = s
 
         q = self.impulse_quantiles
-        q = np.stack([q[x] for x in self.impulse_names], axis=1)
+        q = [q[x] for x in self.impulse_names]
+        if len(q):
+            q = np.stack(q, axis=1)
+        else:
+            q = np.zeros((self.N_QUANTILES, 0))
         self.impulse_quantiles_arr = q
         while len(s.shape) < 3:
             q = np.expand_dims(q, axis=1)
@@ -1677,11 +1689,11 @@ class CDRModel(object):
                         tf.convert_to_tensor([
                             self.X_batch_dim,
                             self.history_length + self.future_length,
-                            max(self.n_impulse, 1)
+                            self.n_impulse
                         ]),
                         dtype=self.FLOAT_TF
                     ),
-                    shape=[None, None, max(self.n_impulse, 1)],
+                    shape=[None, None, self.n_impulse],
                     name='X_time'
                 )
                 self.X_mask = tf.placeholder_with_default(
@@ -1689,11 +1701,11 @@ class CDRModel(object):
                         tf.convert_to_tensor([
                             self.X_batch_dim,
                             self.history_length + self.future_length,
-                            max(self.n_impulse, 1)
+                            self.n_impulse
                         ]),
                         dtype=self.FLOAT_TF
                     ),
-                    shape=[None, None, max(self.n_impulse, 1)],
+                    shape=[None, None, self.n_impulse],
                     name='X_mask'
                 )
 
@@ -2304,7 +2316,13 @@ class CDRModel(object):
                         if 'eval_resample' in x:
                             self.resample_ops.append(x['eval_resample'])
                     else:
-                        _coefficient_fixed_base = []
+                        if self.use_distributional_regression:
+                            nparam = self.get_response_nparam(response)
+                        else:
+                            nparam = 1
+                        ndim = self.get_response_ndim(response)
+                        ncoef = 0
+                        _coefficient_fixed_base = tf.zeros([ncoef, nparam, ndim])
                     self.coefficient_fixed_base[response] = _coefficient_fixed_base
 
                     # Random
@@ -4813,7 +4831,7 @@ class CDRModel(object):
                         irf_weights = tf.gather(irf_weights, terminal_ix, axis=2)
                         X_weighted_by_irf = self.irf_impulses * irf_weights
                     else:
-                        X_weighted_by_irf = tf.zeros((1, 1, 1, 1, 1), dtype=self.FLOAT_TF)
+                        X_weighted_by_irf = tf.zeros_like(self.X)[..., None, None] # Expand param and param_dim dimensions
 
                     X_weighted_unscaled = X_weighted_by_irf
                     X_weighted_unscaled_sumT = tf.reduce_sum(X_weighted_by_irf, axis=1, keepdims=True)
@@ -4846,7 +4864,9 @@ class CDRModel(object):
                 self.output_delta_w_interactions = {}  # Key order: <response>; Value: nbatch x nparam x ndim tensor of stimulus-driven offsets (including interactions) at predictive distribution parameter of the response (summing over predictors and time)
                 self.interaction_delta = {}  # Key order: <response>; Value: nbatch x nparam x ndim tensor of interaction-driven offsets at predictive distribution parameter of the response (summing over predictors and time)
                 self.output = {}  # Key order: <response>; Value: nbatch x nparam x ndim tensor of predictoins at predictive distribution parameter of the response (summing over predictors and time)
+                self.output_dict = {}  # Model baseline output for each parameter of the predictive distribution
                 self.predictive_distribution = {}
+                self.predictive_distribution_sample = {}
                 self.has_analytical_mean = {}
                 self.predictive_distribution_delta = {} # IRF-driven changes in each parameter of the predictive distribution
                 self.predictive_distribution_delta_w_interactions = {} # IRF-driven changes in each parameter of the predictive distribution
@@ -4867,8 +4887,10 @@ class CDRModel(object):
 
                 for i, response in enumerate(self.response_names):
                     self.predictive_distribution[response] = {}
+                    self.predictive_distribution_sample[response] = {}
                     self.predictive_distribution_delta[response] = {}
                     self.predictive_distribution_delta_w_interactions[response] = {}
+                    self.output_dict[response] = {}
                     self.ll_by_var[response] = {}
                     self.error_distribution[response] = {}
                     self.error_distribution_theoretical_quantiles[response] = {}
@@ -4982,8 +5004,17 @@ class CDRModel(object):
                     for j, response_param_name in enumerate(response_param_names):
                         dim_names = self.expand_param_name(response, response_param_name)
                         for k, dim_name in enumerate(dim_names):
-                            self.predictive_distribution_delta[response][dim_name] = output_delta[:, 0, 0, j, k]
-                            self.predictive_distribution_delta_w_interactions[response][dim_name] = output_delta_w_interactions[:, 0, 0, j, k]
+                            if self.use_distributional_regression or j == 0:
+                                self.predictive_distribution_delta[response][dim_name] = output_delta[:, 0, 0, j, k]
+                                self.predictive_distribution_delta_w_interactions[response][dim_name] = output_delta_w_interactions[:, 0, 0, j, k]
+                            else:
+                                self.predictive_distribution_delta[response][dim_name] = tf.zeros_like(
+                                    output_delta[:, 0, 0, 0, k]
+                                )
+                                self.predictive_distribution_delta_w_interactions[response][dim_name] = tf.zeros_like(
+                                    output_delta_w_interactions[:, 0, 0, 0, k]
+                                )
+                            self.output_dict[response][dim_name] = response_params[:, 0, 0, j, k]
 
                     response_dist, response_dist_src, response_params = self._initialize_predictive_distribution_inner(
                         response,
@@ -4991,8 +5022,9 @@ class CDRModel(object):
                     )
                     pred_mean = response_dist.mean()
                     self.predictive_distribution[response] = response_dist
+                    self.predictive_distribution_sample[response] = response_dist.sample()[:, 0, 0]
                     self.has_analytical_mean[response] = response_dist.has_analytical_mean()
-                    if not self.is_categorical(response):
+                    if self.is_real(response):
                         base_response_dist, _, _ = self._initialize_predictive_distribution_inner(
                             response,
                             param_type='output_base'
@@ -5005,6 +5037,7 @@ class CDRModel(object):
                         delta_pred_mean = delta_response_dist.mean()
                         self.predictive_distribution_delta[response]['mean'] = (delta_pred_mean - base_pred_mean)[:, 0, 0]
                         self.predictive_distribution_delta_w_interactions[response]['mean'] = (pred_mean - base_pred_mean)[:, 0, 0]
+                        self.output_dict[response]['mean'] = pred_mean[:, 0, 0]
                         if self.get_response_dist_name(response).startswith('lognormal'):
                             bijector = self.s_bijectors[response]
                         else:
@@ -6620,6 +6653,7 @@ class CDRModel(object):
         """
 
         self.session.close()
+        tf.reset_default_graph()
 
     def set_predict_mode(self, mode):
         """
@@ -6963,23 +6997,25 @@ class CDRModel(object):
             n_time_points=1000
         )
 
-        formatters = {
-            'IRF': left_justified_formatter(irf_integrals, 'IRF')
-        }
-
-        out = ' ' * indent + 'IRF INTEGRALS (EFFECT SIZES):\n'
-        out += ' ' * (indent + 2) + 'Integral upper bound (time): %s\n\n' % integral_n_time_units
-
-        ci_str = irf_integrals.to_string(
-            index=False,
-            justify='left',
-            formatters=formatters
-        )
-
-        for line in ci_str.splitlines():
-            out += ' ' * (indent + 2) + line + '\n'
-
-        out += '\n'
+        out = ''
+        if len(irf_integrals):
+            formatters = {
+                'IRF': left_justified_formatter(irf_integrals, 'IRF')
+            }
+    
+            out += ' ' * indent + 'IRF INTEGRALS (EFFECT SIZES):\n'
+            out += ' ' * (indent + 2) + 'Integral upper bound (time): %s\n\n' % integral_n_time_units
+    
+            ci_str = irf_integrals.to_string(
+                index=False,
+                justify='left',
+                formatters=formatters
+            )
+    
+            for line in ci_str.splitlines():
+                out += ' ' * (indent + 2) + line + '\n'
+    
+            out += '\n'
 
         return out
 
@@ -7836,6 +7872,7 @@ class CDRModel(object):
                     n_samples = self.n_samples_eval
 
                 if verbose:
+                    stderr('\n')
                     pb = keras.utils.Progbar(n_samples)
 
                 out = {}
@@ -7907,11 +7944,12 @@ class CDRModel(object):
             fd = {getattr(self, x): feed_dict[x] for x in feed_dict}
             loss = self.session.run(self.loss_func, feed_dict=fd)
         else:
-            feed_dict[self.use_MAP_mode] = False
+            feed_dict['use_MAP_mode'] = False
             if n_samples is None:
                 n_samples = self.n_samples_eval
 
             if verbose:
+                stderr('\n')
                 pb = keras.utils.Progbar(n_samples)
 
             loss = np.zeros((len(feed_dict[self.Y_time]), n_samples))
@@ -7968,12 +8006,13 @@ class CDRModel(object):
                 nparam = self.get_response_nparam(_response)
                 ndim = self.get_response_ndim(_response)
                 X_conv[_response] = np.zeros(
-                    (len(feed_dict[self.Y_time]), len(self.terminal_names), nparam, ndim, n_samples)
+                    (len(feed_dict['Y_time']), len(self.terminal_names), nparam, ndim, n_samples)
                 )
 
             if n_samples is None:
                 n_samples = self.n_samples_eval
             if verbose:
+                stderr('\n')
                 pb = keras.utils.Progbar(n_samples)
 
             for i in range(0, n_samples):
@@ -7986,7 +8025,7 @@ class CDRModel(object):
                 for _response in _X_conv:
                     X_conv[_response][..., i] = _X_conv[_response]
                 if verbose:
-                    pb.update(i + 1, force=True)
+                    pb.update(i + 1)
 
             for _response in X_conv:
                 X_conv[_response] = X_conv[_response].mean(axis=2)
@@ -8004,6 +8043,47 @@ class CDRModel(object):
 
         return out
 
+    def run_sample_op(self, feed_dict, responses=None, n_samples=None, verbose=True):
+        """
+        Sample data from model's posterior.
+
+        :param feed_dict: ``dict``; A dictionary mapping string input names (e.g. ``'X'``, ``'X_time'``) to their values.
+        :param responses: ``list`` of ``str``, ``str``, or ``None``; Name(s) response variable(s) to sample. If ``None``, samples all univariate responses.
+        :param n_samples: ``int`` or ``None``; number of posterior samples to draw. If ``None``, use model defaults.
+        :param verbose: ``bool``; Send progress reports to standard error.
+        :return: ``dict`` of ``numpy`` arrays; The sampled data, one per per **response**. Each element has shape (batch, n_responses)
+        """
+
+        feed_dict['use_MAP_mode'] = False
+
+        if responses is None:
+            responses = [x for x in self.response_names if self.get_response_ndim(x) == 1]
+        if isinstance(responses, str):
+            responses = [responses]
+
+        if n_samples is None:
+            n_samples = self.n_samples_eval
+        if verbose:
+            stderr('\n')
+            pb = keras.utils.Progbar(n_samples)
+
+        Y = {}
+        for _response in responses:
+            Y[_response] = np.zeros((len(feed_dict['Y_time']), n_samples))
+
+        for i in range(0, n_samples):
+            self.resample_model()
+            to_run = {}
+            for _response in responses:
+                to_run[_response] = self.predictive_distribution_sample[_response]
+            fd = {getattr(self, x): feed_dict[x] for x in feed_dict}
+            _Y = self.session.run(to_run, feed_dict=fd)
+            for _response in _Y:
+                Y[_response][..., i] = _Y[_response]
+            if verbose:
+                pb.update(i + 1)
+
+        return Y
 
     def predict(
             self,
@@ -8924,7 +9004,7 @@ class CDRModel(object):
         :param partition: ``str`` or ``None``; name of data partition (or ``None`` if no partition name), used for output file naming. Ignored unless **dump** is ``True``.
         :param optimize_memory: ``bool``; Compute expanded impulse arrays on the fly rather than pre-computing. Can reduce memory consumption by orders of magnitude but adds computational overhead at each minibatch, slowing training (typically around 1.5-2x the unoptimized training time).
         :param verbose: ``bool``; Report progress and metrics to standard error.
-        :return: ``numpy`` array of shape [len(X)], log likelihood of each data point.
+        :return: ``dict`` of ``numpy`` array of shape [len(X), impulses], one per response per input file per response dimension.
         """
 
         if verbose:
@@ -9043,23 +9123,23 @@ class CDRModel(object):
                             float_type=self.float_type,
                         )
                         fd = {
-                            self.X: _X,
-                            self.X_time: _X_time,
-                            self.X_mask: _X_mask,
-                            self.Y_time: _Y_time,
-                            self.Y_mask: _Y_mask,
-                            self.Y_gf: _Y_gf,
-                            self.training: not self.predict_mode
+                            'X': _X,
+                            'X_time': _X_time,
+                            'X_mask': _X_mask,
+                            'Y_time': _Y_time,
+                            'Y_mask': _Y_mask,
+                            'Y_gf': _Y_gf,
+                            'training': not self.predict_mode
                         }
                     else:
                         fd = {
-                            self.X: X[i:i + B],
-                            self.X_time: X_time[i:i + B],
-                            self.X_mask: X_mask[i:i + B],
-                            self.Y_time: Y_time[i:i + B],
-                            self.Y_mask: Y_mask[i:i + B],
-                            self.Y_gf: None if Y_gf is None else Y_gf[i:i + B],
-                            self.training: not self.predict_mode
+                            'X': X[i:i + B],
+                            'X_time': X_time[i:i + B],
+                            'X_mask': X_mask[i:i + B],
+                            'Y_time': Y_time[i:i + B],
+                            'Y_mask': Y_mask[i:i + B],
+                            'Y_gf': None if Y_gf is None else Y_gf[i:i + B],
+                            'training': not self.predict_mode
                         }
                     if verbose:
                         stderr('\rMinibatch %d/%d' % ((i / B) + 1, n_eval_minibatch))
@@ -9112,18 +9192,254 @@ class CDRModel(object):
                                     for c in Y[ix].columns:
                                         if c not in df:
                                             new_cols.append(c)
-                                    df_extra = Y[ix][new_cols].reset_index(drop=True)
+                                    df_extra = Y_in[ix][new_cols].reset_index(drop=True)
                                 df = pd.concat([df, df_extra], axis=1)
                             out[_response][dim_name].append(df)
 
-                        if dump:
-                            if multiple_files:
-                                name_base = '%s_%s_f%s%s' % (sn(_response), sn(dim_name), ix, partition_str)
-                            else:
-                                name_base = '%s_%s%s' % (sn(_response), sn(dim_name), partition_str)
-                            df.to_csv(self.outdir + '/X_conv_%s.csv' % name_base, sep=' ', na_rep='NaN', index=False)
+                            if dump:
+                                if multiple_files:
+                                    name_base = '%s_%s_f%s%s' % (sn(_response), sn(dim_name), ix, partition_str)
+                                else:
+                                    name_base = '%s_%s%s' % (sn(_response), sn(dim_name), partition_str)
+                                df.to_csv(self.outdir + '/X_conv_%s.csv' % name_base, sep=' ', na_rep='NaN', index=False)
 
                 return out
+
+    def sample(
+            self,
+            X,
+            Y=None,
+            first_obs=None,
+            last_obs=None,
+            Y_time=None,
+            Y_gf=None,
+            responses=None,
+            X_in_Y_names=None,
+            X_in_Y=None,
+            n_samples=None,
+            extra_cols=False,
+            dump=False,
+            partition=None,
+            optimize_memory=False,
+            verbose=True
+    ):
+        """
+        Sample data from the fitted CDR(NN) posterior.
+
+        :param X: list of ``pandas`` tables; matrices of independent variables, grouped by series and temporally sorted.
+            Each element of **X** must contain the following columns (additional columns are ignored):
+
+            * ``time``: Timestamp associated with each observation in **X**
+
+            Across all elements of **X**, there must be a column for each independent variable in the CDR ``form_str`` provided at initialization.
+
+        :param Y (optional): ``list`` of ``pandas`` tables; matrices of independent variables, grouped by series and temporally sorted.
+            This parameter is optional and responses are not directly used. It simply allows the user to omit the
+            inputs **Y_time**, **Y_gf**, **first_obs**, and **last_obs**, since they can be inferred from **Y**
+            If supplied, each element of **Y** must contain the following columns (additional columns are ignored):
+
+            * ``time``: Timestamp associated with each observation in **y**
+            * ``first_obs``:  Index in the design matrix **X** of the first observation in the time series associated with each entry in **y**
+            * ``last_obs``:  Index in the design matrix **X** of the immediately preceding observation in the time series associated with each entry in **y**
+            * Columns with a subset of the names of the DVs specified in ``form_str`` (all DVs should be represented somewhere in **y**)
+            * A column for each random grouping factor in the model formula
+
+        :param first_obs: ``list`` of ``list`` of index vectors (``list``, ``pandas`` series, or ``numpy`` vector) of first observations; the list contains one element for each response array. Inner lists contain vectors of row indices, one for each element of **X**, of the first impulse in the time series associated with each response. If ``None``, inferred from **Y**.
+            Sort order and number of observations must be identical to that of ``y_time``.
+        :param last_obs: ``list`` of ``list`` of index vectors (``list``, ``pandas`` series, or ``numpy`` vector) of last observations; the list contains one element for each response array. Inner lists contain vectors of row indices, one for each element of **X**, of the last impulse in the time series associated with each response. If ``None``, inferred from **Y**.
+            Sort order and number of observations must be identical to that of ``y_time``.
+        :param Y_time: ``list`` of response timestamp vectors (``list``, ``pandas`` series, or ``numpy`` vector); vector(s) of response timestamps, one for each response array. Needed to timestamp any response-aligned predictors (ignored if none in model).
+        :param Y_gf: ``list`` of random grouping factor values (``list``, ``pandas`` series, or ``numpy`` vector); random grouping factor values (if applicable), one for each response dataframe.
+            Can be of type ``str`` or ``int``.
+            Sort order and number of observations must be identical to that of ``y_time``.
+        :param responses: ``list`` of ``str``, ``str``, or ``None``; Name(s) response variable(s) to convolve toward. If ``None``, convolves toward all univariate responses. Multivariate convolution (e.g. of categorical responses) is supported but turned off by default to avoid excessive computation. When convolving toward a multivariate response, a set of convolved predictors will be generated for each dimension of the response.
+        :param X_in_Y_names: ``list`` of ``str``; names of predictors contained in **Y** rather than **X** (must be present in all elements of **Y**). If ``None``, no such predictors.
+        :param X_in_Y: ``list`` of ``pandas`` ``DataFrame`` or ``None``; tables (one per response array) of predictors contained in **Y** rather than **X** (must be present in all elements of **Y**). If ``None``, inferred from **Y** and **X_in_Y_names**.
+        :param n_samples: ``int`` or ``None``; number of posterior samples to draw if Bayesian, ignored otherwise. If ``None``, use model defaults.
+        :param extra_cols: ``bool``; whether to include columns from **Y** in output tables.
+        :param dump; ``bool``; whether to save generated log likelihood vectors to disk.
+        :param partition: ``str`` or ``None``; name of data partition (or ``None`` if no partition name), used for output file naming. Ignored unless **dump** is ``True``.
+        :param optimize_memory: ``bool``; Compute expanded impulse arrays on the fly rather than pre-computing. Can reduce memory consumption by orders of magnitude but adds computational overhead at each minibatch, slowing training (typically around 1.5-2x the unoptimized training time).
+        :param verbose: ``bool``; Report progress and metrics to standard error.
+        :return: ``dict`` of ``numpy`` array of shape [len(X), n_samples], array of samples, one per response.
+        """
+
+        if verbose:
+            usingGPU = tf.test.is_gpu_available()
+            stderr('Using GPU: %s\n' % usingGPU)
+            stderr('Sampling...\n')
+
+        if partition and not partition.startswith('_'):
+            partition_str = '_' + partition
+        else:
+            partition_str = ''
+
+        if n_samples is None:
+            n_samples = self.n_samples_eval
+
+        if responses is None:
+            responses = [x for x in self.response_names if self.get_response_ndim(x) == 1]
+        if isinstance(responses, str):
+            responses = [responses]
+
+        # Preprocess data
+        if not isinstance(X, list):
+            X = [X]
+        X_in = X
+        if Y is None:
+            assert Y_time is not None, 'Either Y or Y_time must be provided.'
+            lengths = [len(_Y_time) for _Y_time in Y_time]
+        else:
+            if not isinstance(Y, list):
+                Y = [Y]
+            lengths = [len(_Y) for _Y in Y]
+        n = sum(lengths)
+        Y_in = Y
+        if Y_time is None:
+            Y_time_in = [_Y.time for _Y in Y]
+        else:
+            Y_time_in = Y_time
+        if Y_gf is None:
+            assert Y is not None, 'Either Y or Y_gf must be provided.'
+            Y_gf_in = Y
+        else:
+            Y_gf_in = Y_gf
+        if X_in_Y_names:
+            X_in_Y_names = [x for x in X_in_Y_names if x in self.impulse_names]
+        X_in_Y_in = X_in_Y
+
+        Y, first_obs, last_obs, Y_time, Y_mask, Y_gf, X_in_Y = build_CDR_response_data(
+            self.response_names,
+            Y=Y_in,
+            first_obs=first_obs,
+            last_obs=last_obs,
+            Y_gf=Y_gf_in,
+            X_in_Y_names=X_in_Y_names,
+            X_in_Y=X_in_Y_in,
+            Y_category_map=self.response_category_to_ix,
+            response_to_df_ix=self.response_to_df_ix,
+            gf_names=self.rangf,
+            gf_map=self.rangf_map
+        )
+
+        if not optimize_memory or not np.isfinite(self.minibatch_size):
+            X, X_time, X_mask = build_CDR_impulse_data(
+                X_in,
+                first_obs,
+                last_obs,
+                X_in_Y_names=X_in_Y_names,
+                X_in_Y=X_in_Y,
+                history_length=self.history_length,
+                future_length=self.future_length,
+                impulse_names=self.impulse_names,
+                int_type=self.int_type,
+                float_type=self.float_type,
+            )
+
+        with self.session.as_default():
+            with self.session.graph.as_default():
+                self.set_predict_mode(True)
+                B = self.eval_minibatch_size
+                n_eval_minibatch = math.ceil(n / B)
+                Y_samp = {}
+                for _response in responses:
+                    Y_samp[_response] = np.zeros((n, n_samples))
+                for i in range(0, n, B):
+                    if verbose:
+                        stderr('\rMinibatch %d/%d' % ((i / B) + 1, n_eval_minibatch))
+                    if optimize_memory:
+                        _Y = None if Y is None else Y[i:i + B]
+                        _first_obs = [x[i:i + B] for x in first_obs]
+                        _last_obs = [x[i:i + B] for x in last_obs]
+                        _Y_time = Y_time[i:i + B]
+                        _Y_mask = Y_mask[i:i + B]
+                        _Y_gf = None if Y_gf is None else Y_gf[i:i + B]
+                        _X_in_Y = None if X_in_Y is None else X_in_Y[i:i + B]
+
+                        _X, _X_time, _X_mask = build_CDR_impulse_data(
+                            X_in,
+                            _first_obs,
+                            _last_obs,
+                            X_in_Y_names=X_in_Y_names,
+                            X_in_Y=_X_in_Y,
+                            history_length=self.history_length,
+                            future_length=self.future_length,
+                            impulse_names=self.impulse_names,
+                            int_type=self.int_type,
+                            float_type=self.float_type,
+                        )
+                        fd = {
+                            'X': _X,
+                            'X_time': _X_time,
+                            'X_mask': _X_mask,
+                            'Y_time': _Y_time,
+                            'Y_mask': _Y_mask,
+                            'Y_gf': _Y_gf,
+                            'training': not self.predict_mode
+                        }
+                    else:
+                        fd = {
+                            'X': X[i:i + B],
+                            'X_time': X_time[i:i + B],
+                            'X_mask': X_mask[i:i + B],
+                            'Y_time': Y_time[i:i + B],
+                            'Y_mask': Y_mask[i:i + B],
+                            'Y_gf': None if Y_gf is None else Y_gf[i:i + B],
+                            'training': not self.predict_mode
+                        }
+                    if verbose:
+                        stderr('\rMinibatch %d/%d' % ((i / B) + 1, n_eval_minibatch))
+                    _Y_samp = self.run_sample_op(
+                        fd,
+                        responses=responses,
+                        n_samples=n_samples,
+                        verbose=verbose
+                    )
+                    for _response in _Y_samp:
+                        Y_samp[_response][i:i + B] = _Y_samp[_response]
+
+                # Split into per-file predictions.
+                # Exclude the length of last file because it will be inferred.
+                Y_samp = split_cdr_outputs(Y_samp, [x for x in lengths[:-1]])
+
+                if verbose:
+                    stderr('\n\n')
+
+                self.set_predict_mode(False)
+
+                out = {}
+                n_digits = int(np.floor(np.log10(n_samples))) + 1
+                col_template = 'CDRsamp%%0%sd' % n_digits
+                names = [col_template % x for x in range(1, n_samples + 1)]
+                for _response in responses:
+                    out[_response] = []
+                    file_ix = self.response_to_df_ix[_response]
+                    multiple_files = len(file_ix) > 1
+                    for ix in file_ix:
+                        df = pd.DataFrame(Y_samp[_response][ix], columns=names, dtype=self.FLOAT_NP)
+                        if extra_cols:
+                            if Y is None:
+                                df_extra = {x: Y_gf_in[i] for i, x in enumerate(self.rangf)}
+                                df_extra['time'] = Y_time_in[ix]
+                                df_extra = pd.DataFrame(df_extra)
+                            else:
+                                new_cols = []
+                                for c in Y_in[ix].columns:
+                                    if c not in df:
+                                        new_cols.append(c)
+                                df_extra = Y_in[ix][new_cols].reset_index(drop=True)
+                            df = pd.concat([df, df_extra], axis=1)
+                        out[_response].append(df)
+
+                        if dump:
+                            if multiple_files:
+                                name_base = '%s_f%s%s' % (sn(_response), ix, partition_str)
+                            else:
+                                name_base = '%s_%s' % (sn(_response), partition_str)
+                            df.to_csv(self.outdir + '/Ysamp_%s.csv' % name_base, sep=' ', na_rep='NaN', index=False)
+
+                return out
+
 
     def error_theoretical_quantiles(
             self,
@@ -9196,7 +9512,8 @@ class CDRModel(object):
             ymax=None,
             yres=None,
             n_samples=None,
-            level=95
+            level=95,
+            baseline_correct=True
     ):
         """
         Compute arrays of plot data by passing input manipulations through the model, relative to a reference input.
@@ -9246,6 +9563,7 @@ class CDRModel(object):
         :param yres: ``int`` or ``None``; Resolution (number of plot points) on y-axis. If ``None``, inferred.
         :param n_samples: ``int`` or ``None``; Number of plot samples to draw for computing intervals. If ``None``, ``0``, ``1``, or if the model type does not support uncertainty estimation, the maximum likelihood estimate will be returned.
         :param level: ``float``; The confidence level of any intervals (i.e. ``95`` indicates 95% confidence/credible intervals).
+        :param baseline_correct: ``bool``; Whether to compute and subtract out the baseline response.
         :return: 5-tuple (plot_axes, mean, lower, upper, samples); Let RX, RY, S, and K respectively be the x-axis resolution, y-axis resolution, number of samples, and number of output dimensions (manipulations). If plot is 2D, ``plot_axes`` is an array with shape ``(RX,)``, ``mean``, ``lower``, and ``upper`` are dictionaries of arrays with shape ``(RX, K)``, one for each **response_param** of each **response**,  and ``samples is a dictionary of arrays with shape ``(S, RX, K)``,  one for each **response_param** of each **response**. If plot is 3D, ``plot_axes`` is a pair of arrays each with shape ``(RX, RY)`` (i.e. a meshgrid), ``mean``, ``lower``, and ``upper`` are dictionaries of arrays with shape ``(RX, RY, K)``, one for each **response_param** of each **response**, and ``samples`` is a dictionary of arrays with shape ``(S, RX, RY, K)``, one for each **response_param** of each **response**.
         """
 
@@ -9620,8 +9938,10 @@ class CDRModel(object):
 
         X_ref_in = np.concatenate(X_ref_in, axis=0)
         X_time_ref_in = np.concatenate(X_time_ref_in, axis=0)
+        X_time_ref_in = X_time_ref_in[..., :X_ref_in.shape[-1]]    # Trim in case there are no impulses in the model
         X_mask_ref_in = np.ones_like(X_time_ref_in)
         t_delta_ref_in = np.concatenate(t_delta_ref_in, axis=0)
+        t_delta_ref_in = t_delta_ref_in[..., :X_ref_in.shape[-1]]  # Trim in case there are no impulses in the model
         gf_y_ref_in = np.concatenate(gf_y_ref_in, axis=0)
 
         # Bring manipulations into 1-1 alignment on the batch dimension
@@ -9654,10 +9974,14 @@ class CDRModel(object):
                 _X = X
 
             self.resample_model()
-            if include_interactions:
-                delta = self.predictive_distribution_delta_w_interactions
+            if baseline_correct:
+                if include_interactions:
+                    value = self.predictive_distribution_delta_w_interactions
+                else:
+                    value = self.predictive_distribution_delta
             else:
-                delta = self.predictive_distribution_delta
+                assert not include_interactions, 'Excluding interactions requires baseline correction'
+                value = self.output_dict
             to_run = {}
             b = None
             for response in responses:
@@ -9676,7 +10000,7 @@ class CDRModel(object):
                         )
                     dim_names = self.expand_param_name(response, response_param)
                     for dim_name in dim_names:
-                        to_run[response][dim_name] = delta[response][dim_name]
+                        to_run[response][dim_name] = value[response][dim_name]
 
             sample_ref = []
             for j in range(0, len(X_ref_in), b):
@@ -9717,7 +10041,8 @@ class CDRModel(object):
                     sample[response] = {}
                     for dim_name in sample_main[response]:
                         sample_main[response][dim_name] = np.reshape(sample_main[response][dim_name], sample_shape, 'F')
-                        sample_main[response][dim_name] = sample_main[response][dim_name] - sample_ref[response][dim_name]
+                        if baseline_correct:
+                            sample_main[response][dim_name] = sample_main[response][dim_name] - sample_ref[response][dim_name]
                         if ref_as_manip:
                             sample[response][dim_name] = np.concatenate(
                                 [sample_ref[response][dim_name], sample_main[response][dim_name]],
@@ -9867,7 +10192,8 @@ class CDRModel(object):
                 step_size.append(steps)
             delta = self.plot_step_map[x]
             manipulations.append({x: delta})
-        step_size = np.stack(step_size, axis=1)[None, ...] # Add sample dim
+        if len(step_size):
+            step_size = np.stack(step_size, axis=1)[None, ...] # Add sample dim
 
         if random:
             ranef_group_names = self.ranef_group_names
@@ -9890,10 +10216,14 @@ class CDRModel(object):
 
         if responses is None:
             responses = self.response_names
+        
         if response_params is None:
-            response_params = {'mean'}
-            for _response in responses:
-                response_params.add(self.get_response_params(_response)[0])
+            response_params = set()
+            for response in responses:
+                if self.is_real(response) and self.has_analytical_mean[response]:
+                    response_params.add('mean')
+                else:
+                    response_params.add(self.get_response_params(response)[0])
             response_params = sorted(list(response_params))
 
         for g, gf_y_ref in enumerate(gf_y_refs):
@@ -10044,6 +10374,7 @@ class CDRModel(object):
             level=95,
             n_samples=None,
             prefix=None,
+            suffix='.png',
             use_legend=None,
             use_line_markers=False,
             transparent_background=False,
@@ -10102,6 +10433,7 @@ class CDRModel(object):
         :param level: ``float``; significance level for confidence/credible intervals, if supported.
         :param n_samples: ``int`` or ``None``; number of posterior samples to draw if Bayesian, ignored otherwise. If ``None``, use model defaults.
         :param prefix: ``str`` or ``None``; prefix appended to output filenames. If ``None``, no prefix added.
+        :param suffix: ``str``; file extension of plot outputs.
         :param use_legend: ``bool`` or ``None``; whether to include a legend in plots with multiple components. If ``None``, use default setting.
         :param use_line_markers: ``bool``; whether to add markers to lines in univariate IRF plots.
         :param transparent_background: ``bool``; whether to use a transparent background. If ``False``, uses a white background.
@@ -10125,7 +10457,7 @@ class CDRModel(object):
         if response_params is None:
             response_params = set()
             for response in responses:
-                if self.has_analytical_mean[response]:
+                if self.is_real(response) and self.has_analytical_mean[response]:
                     response_params.add('mean')
                 else:
                     response_params.add(self.get_response_params(response)[0])
@@ -10216,9 +10548,6 @@ class CDRModel(object):
         # IRF 1D
         if generate_univariate_irf_plots or generate_univariate_irf_heatmaps:
             names = self.impulse_names
-            has_rate = 'rate' in names
-            if has_rate:
-                names = [x for x in names if not self.has_nn_irf or x != 'rate']
             if not plot_dirac:
                 names = [x for x in names if self.is_non_dirac(x)]
             if pred_names is not None and len(pred_names) > 0:
@@ -10228,6 +10557,10 @@ class CDRModel(object):
                         if ID == name or re.match(ID if ID.endswith('$') else ID + '$', name) is not None:
                             new_names.append(name)
                 names = new_names
+            # Rate is implicit in models with NN IRFs and shouldn't get its own manipulation.
+            # Temporarily remove it if needed and then add it back in later
+            has_rate = 'rate' in names
+            names = [x for x in names if not (self.has_nn_irf and x == 'rate')]
 
             plot_step_map = self.get_plot_step_map(
                 plot_step,
@@ -10253,6 +10586,7 @@ class CDRModel(object):
             names_fixed = [x for x in names if x in fixed_impulses]
             manipulations_fixed = [x for x in manipulations if list(x.keys())[0] in fixed_impulses]
 
+            # Re-add rate if it was removed to compute manipulations
             if has_rate and self.has_nn_irf:
                 names = ['rate'] + names
                 names_fixed = ['rate'] + names_fixed
@@ -10317,7 +10651,7 @@ class CDRModel(object):
                             filename += '_' + ranef_level_names[g]
                         if mc:
                             filename += '_mc'
-                        filename += '.png'
+                        filename += suffix
 
                         _plot_y = plot_y[_response][_dim_name]
                         _lq = None if lq is None else lq[_response][_dim_name]
@@ -10361,7 +10695,7 @@ class CDRModel(object):
                                 names_cur,
                                 sort_names=sort_names,
                                 outdir=self.outdir,
-                                filename=filename[:-4] + '_hm.png',
+                                filename=filename[:-4] + '_hm' + suffix,
                                 irf_name_map=irf_name_map,
                                 plot_x_inches=plot_x_inches,
                                 plot_y_inches=plot_y_inches,
@@ -10441,7 +10775,7 @@ class CDRModel(object):
                                 filename += '_' + ranef_level_names[g]
                             if mc:
                                 filename += '_mc'
-                            filename += '.png'
+                            filename += suffix
 
                             plot_irf(
                                 plot_x,
@@ -10449,6 +10783,9 @@ class CDRModel(object):
                                 [name],
                                 lq=None if _lq is None else _lq[:, g:g + 1],
                                 uq=None if _uq is None else _uq[:, g:g + 1],
+                                sort_names=sort_names,
+                                prop_cycle_length=prop_cycle_length,
+                                prop_cycle_map=prop_cycle_map,
                                 outdir=self.outdir,
                                 filename=filename,
                                 irf_name_map=irf_name_map,
@@ -10560,7 +10897,7 @@ class CDRModel(object):
                                         filename += '_' + ranef_level_names[g]
                                     if mc:
                                         filename += '_mc'
-                                    filename += '.png'
+                                    filename += suffix
 
                                     plot_surface(
                                         plot_x,
@@ -10597,7 +10934,7 @@ class CDRModel(object):
                     plot_x = self.session.run(self.support, feed_dict=fd)
                     plot_y = self.session.run(self.error_distribution_plot[_response], feed_dict=fd)
 
-                    plot_name = 'error_distribution_%s.png' % sn(_response)
+                    plot_name = 'error_distribution_%s%s' % (sn(_response), suffix)
 
                     lq = None
                     uq = None
@@ -10965,6 +11302,10 @@ class CDREnsemble(CDRModel):
         for model in self.models:
             model.load(*args, **kwargs)
 
+    def finalize(self):
+        for model in self.models:
+            model.finalize()
+
     def save(self, *args, **kwargs):
         raise NotImplementedError('A CDREnsemble is not a trainable object and cannot be saved')
 
@@ -10973,3 +11314,4 @@ class CDREnsemble(CDRModel):
 
     def build(self, *args, **kwargs):
         raise NotImplementedError('A CDREnsemble is not a trainable object and cannot be built')
+

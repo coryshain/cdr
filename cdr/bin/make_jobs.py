@@ -18,7 +18,7 @@ if __name__ == '__main__':
     Generate SLURM batch jobs to run CDR models specified in one or more config files.
     ''')
     argparser.add_argument('paths', nargs='+', help='Path(s) to CDR config file(s).')
-    argparser.add_argument('-j', '--job_types', nargs='+', default=['fit'], help='Type of job to run. List of ``["fit", "predict", "summarize", "plot", "save_and_exit"]``')
+    argparser.add_argument('-j', '--job_types', nargs='+', default=['fit'], help='Type of job to run. List of ``["fit", "predict", "summarize", "plot", "sample", "save_and_exit"]``')
     argparser.add_argument('-p', '--partition', nargs='+', help='Partition(s) over which to predict/evaluate')
     argparser.add_argument('-t', '--time', type=int, default=48, help='Maximum number of hours to train models')
     argparser.add_argument('-n', '--n_cores', type=int, default=4, help='Number of cores to request')
@@ -85,6 +85,8 @@ if __name__ == '__main__':
                         job_str = wrapper % ('python3 -m cdr.bin.summarize %s -m %s %s' % (path, m, cli_args))
                     elif job_type.lower() == 'plot':
                         job_str = wrapper % ('python3 -m cdr.bin.plot %s -m %s %s' % (path, m, cli_args))
+                    elif job_type.lower() == 'sample':
+                        job_str = wrapper % ('python3 -m cdr.bin.sample %s -m %s %s' % (path, m, cli_args))
                     else:
                         raise ValueError('Unrecognized job type: %s.' % job_type)
                     f.write(job_str)
