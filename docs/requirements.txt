@@ -3,3 +3,4 @@ scipy
 pandas
 matplotlib
 Sphinx~=2.4
+Jinja2<3.1
