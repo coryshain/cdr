@@ -3,3 +3,4 @@ scipy
 pandas
 matplotlib
 Sphinx
+sphinx-rtd-theme
