@@ -8,7 +8,7 @@ Given data and a model template specifying the functional form(s) of the IRF ker
 CDR is a form of distributional regression: it can model continuous-time influences of predictors on all parameters of arbitrary predictive distributions, not just on the mean of a normal predictive distribution.
 This approach can be generalized to account for non-stationarity, non-linearity, non-additivity, and context-dependence by incorporating deep neural network components (Shain, 2021).
 
-This repository contains source code for the `cdr` Python module as well as support for reproducing published experiments.
+This repository contains source code for the `cdr` Python module as well as support for reproducing published experiments (see [Reproducing published results](#reproducing-published-results) below).
 This package provides (1) an API for programming with CDR and (2) executables that allow users to train and evaluate CDR models out of the box, without needing to write any code.
 Full documentation for the `cdr` module is available at [http://cdr.readthedocs.io/en/latest/](http://cdr.readthedocs.io/en/latest/).
 This repository also provides an experimental tool for interactive browser-based visualization of CDR estimates.
@@ -113,9 +113,9 @@ Current reproduction branches are:
  - `cognition21` (Shain & Schuler, 2021)
  - `acl21` (Shain, 2021)
  - `fMRI_ns_WM` (Shain et al., 2022)
- - `cdrnn_journal` (Shain & Schuler, arXiv)
- - `pred_fn` (Shain et al., PsyArXiv)
- - `freq_pred` (Shain, PsyArXiv)
+ - `cdrnn_journal` (Shain & Schuler, 2024)
+ - `pred_fn` (Shain et al., 2024)
+ - `freq_pred` (Shain, 2024)
 
 Thus, to reproduce results from ACL21, for example, run `git checkout acl21` from the repository root, and follow instructions in the `README` file.
 The reproduction branches are also useful sources of example configuration files to use as templates for setting up your own experiments, although you should consult the docs for full documentation of the structure of CDR experiment configurations.
@@ -147,8 +147,8 @@ Shain, Cory (2021). CDRNN: Discovering complex dynamics in human language proces
 
 Shain, Cory and Blank, Idan and Fedorenko, Evelina and Gibson, Edward and Schuler, William (2022). Robust effects of working memory demand during naturalistic language comprehension in language-selective cortex. _Journal of Neuroscience_.
 
-Shain, Cory and Schuler, William (arXiv). A deep learning approach to analyzing continuous-time systems. _arXiv_. [https://arxiv.org/abs/2209.12128](https://arxiv.org/abs/2209.12128)
+Shain, Cory and Schuler, William (2024). A deep learning approach to analyzing continuous-time systems. _Open Mind_.
 
-Shain, Cory and Meister, Clara and Pimentel, Tiago and Cotterell, Ryan and Levy, Roger (2023). Large-Scale Evidence for Logarithmic Effects of Word Predictability on Reading Time. _PsyArXiv_. [https://psyarxiv.com/4hyna/](https://psyarxiv.com/4hyna/)
+Shain, Cory and Meister, Clara and Pimentel, Tiago and Cotterell, Ryan and Levy, Roger (2024). Large-Scale Evidence for Logarithmic Effects of Word Predictability on Reading Time. _PNAS_.
 
-Shain, Cory (2023). Word frequency and predictability dissociate in naturalistic reading. _PsyArXiv_.
+Shain, Cory (2024). Word frequency and predictability dissociate in naturalistic reading. _Open Mind_.
