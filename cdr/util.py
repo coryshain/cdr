@@ -402,8 +402,10 @@ def paths_from_partition_cliarg(partition, config):
         _X_paths = X_map[p]
         _y_paths = Y_map[p]
 
-        assert _X_paths is not None, 'No data path provided for partition %s. Exiting.' % p
-        assert _y_paths is not None, 'No data path provided for partition %s. Exiting.' % p
+        assert _X_paths is not None, 'No data path provided for partition %s. If you did not intend to require ' + \
+                                     'dev evaluation, set ``eval_freq`` to ``0`` in your model config.' % p
+        assert _y_paths is not None, 'No data path provided for partition %s. If you did not intend to require ' + \
+                                     'dev evaluation, set ``eval_freq`` to ``0`` in your model config.' % p
 
         for _X_path in _X_paths:
             if _X_path not in X_paths:
