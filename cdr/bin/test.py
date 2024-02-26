@@ -22,6 +22,55 @@ def joint_scale(a, b):
     return a/scaling_factor, b/scaling_factor
 
 
+def get_summary(
+        a_model,
+        b_model,
+        a_perf,
+        b_perf,
+        base_diff,
+        p_value,
+        metric,
+        partition_str,
+        n,
+        a_ensemble_size=None,
+        b_ensemble_size=None,
+        agg_fn=None,
+        r1=None,
+        r2=None,
+        rx=None
+    ):
+    summary = '='*50 + '\n'
+    summary += 'Model comparison:      %s vs %s\n' % (a_model, b_model)
+    summary += 'Partition:             %s\n' % partition_str
+    summary += 'Metric:                %s\n' % metric
+    if a_ensemble_size is not None or b_ensemble_size is not None:
+        if agg_fn is not None:
+            summary += 'Ensemble agg fn:       %s\n' % agg_fn
+        if a_ensemble_size is not None:
+            summary += 'Model A ensemble size: %s\n' % a_ensemble_size
+        if b_ensemble_size is not None:
+            summary += 'Model B ensemble size: %s\n' % b_ensemble_size
+    summary += 'n: %s\n' % n
+    if r1 is not None:
+        summary += 'r(a,y):                %s\n' % r1
+    if r2 is not None:
+        summary += 'r(b,y):                %s\n' % r2
+    if rx is not None:
+        summary += 'r(a,b):            %s\n' % rx
+    summary += 'Model A:               %s\n' % a_model
+    summary += 'Model B:               %s\n' % b_model
+    summary += 'Model A score:         %.4f\n' % a_perf
+    summary += 'Model B score:         %.4f\n' % b_perf
+    summary += 'Difference:            %.4f\n' % base_diff
+    summary += 'p:                     %.4e%s\n' % (p_value, '' if p_value > 0.05 \
+        else '*' if p_value > 0.01 else '**' if p_value > 0.001 else '***')
+    summary += '='*50 + '\n'
+
+    return summary
+
+
+
+
 if __name__ == '__main__':
     argparser = argparse.ArgumentParser('''
         Performs pairwise permutation test for significance of differences in prediction quality between models.
@@ -189,26 +238,23 @@ if __name__ == '__main__':
                                             out_path = outdir + '/' + name_base + '.txt'
                                             with open(out_path, 'w') as f:
                                                 stderr('Saving output to %s...\n' % out_path)
-
-                                                summary = '='*50 + '\n'
-                                                summary += 'Model comparison: %s vs %s\n' % (a_model, b_model)
-                                                summary += 'Partition:  %s\n' % partition_str
-                                                summary += 'Metric:     %s\n' % metric
-                                                if a.shape[1] > 1:
-                                                    summary += 'Ens agg fn: %s\n' % args.agg 
-                                                summary += 'n:          %s\n' % a.shape[0]
-                                                if r1 is not None:
-                                                    summary += 'r(a,y):     %s\n' % r1
-                                                if r2 is not None:
-                                                    summary += 'r(b,y):     %s\n' % r2
-                                                if rx is not None:
-                                                    summary += 'r(a,b):     %s\n' % rx
-                                                summary += 'Model A:    %.4f\n' % a_perf
-                                                summary += 'Model B:    %.4f\n' % b_perf
-                                                summary += 'Difference: %.4f\n' % base_diff
-                                                summary += 'p:          %.4e%s\n' % (p_value, '' if p_value > 0.05 \
-                                                    else '*' if p_value > 0.01 else '**' if p_value > 0.001 else '***')
-                                                summary += '='*50 + '\n'
+                                                summary = get_summary(
+                                                        a_model,
+                                                        b_model,
+                                                        a_perf,
+                                                        b_perf,
+                                                        base_diff,
+                                                        p_value,
+                                                        metric,
+                                                        partition_str,
+                                                        a.shape[0],
+                                                        a_ensemble_size=a.shape[1],
+                                                        b_ensemble_size=b.shape[1],
+                                                        agg_fn=args.agg,
+                                                        r1=r1,
+                                                        r2=r2,
+                                                        rx=rx
+                                                    )
 
                                                 f.write(summary)
                                                 sys.stdout.write(summary)
@@ -349,33 +395,24 @@ if __name__ == '__main__':
                             out_path = outdir + '/' + name_base + '.txt'
                             with open(out_path, 'w') as f:
                                 stderr('Saving output to %s...\n' % out_path)
-        
-                                summary = '=' * 50 + '\n'
-                                summary += 'Model comparison: %s vs %s\n' % (a_name, b_name)
-                                summary += 'Partition: %s\n' % partition_str
-                                summary += 'Metric: %s\n' % metric
-                                if a.shape[1] > 1:
-                                    summary += 'Ens agg fn: %s\n' % args.agg 
-                                summary += 'Experiments pooled:\n'
-                                for exp in exps_outdirs:
-                                    summary += '  %s\n' % exp
-                                summary += 'n:          %s\n' % a.shape[0]
-                                if r1 is not None:
-                                    summary += 'r(a,y):     %s\n' % r1
-                                if r2 is not None:
-                                    summary += 'r(b,y):     %s\n' % r2
-                                if rx is not None:
-                                    summary += 'r(a,b):     %s\n' % rx
-                                summary += 'Model A:    %.4f\n' % a_perf
-                                summary += 'Model B:    %.4f\n' % b_perf
-                                summary += 'Difference: %.4f\n' % diff
-                                summary += 'p: %.4e%s\n' % (
-                                    p_value,
-                                    '' if p_value > 0.05 else '*' if p_value > 0.01
-                                    else '**' if p_value > 0.001 else '***'
+                                summary = get_summary(
+                                        a_name,
+                                        b_name,
+                                        a_perf,
+                                        b_perf,
+                                        diff,
+                                        p_value,
+                                        metric,
+                                        partition_str,
+                                        a.shape[0],
+                                        a_ensemble_size=a.shape[1],
+                                        b_ensemble_size=b.shape[1],
+                                        agg_fn=args.agg,
+                                        r1=r1,
+                                        r2=r2,
+                                        rx=rx
                                 )
-                                summary += '=' * 50 + '\n'
-        
+         
                                 f.write(summary)
                                 sys.stdout.write(summary)
         

@@ -168,7 +168,7 @@ if __name__ == '__main__':
                 for partition in base_partitions:
                     if os.path.exists(p.outdir + '/' + b_path):
                         for path in os.listdir(p.outdir + '/' + b_path):
-                            if (not response or response in path) and path.startswith('eval') and path.endswith('%s.txt' % partition):
+                            if (not response or response in path) and path.startswith('eval') and path.endswith('_%s.txt' % partition):
                                 eval_path = p.outdir + '/' + b_path + '/' + path
                                 _response = path.split('_')[1]
                                 if args.collapse:
@@ -207,7 +207,7 @@ if __name__ == '__main__':
                 for partition in base_partitions:
                     if os.path.exists(p.outdir + '/' + s_path):
                         for path in os.listdir(p.outdir + '/' + s_path):
-                            if (not response or response in path) and path.startswith('eval') and path.endswith('%s.txt' % partition):
+                            if (not response or response in path) and path.startswith('eval') and path.endswith('_%s.txt' % partition):
                                 eval_path = p.outdir + '/' + s_path + '/' + path
                                 _response = path.split('_')[1]
                                 if args.collapse:

@@ -20,13 +20,12 @@ def stitch(dir_paths, image_names, output_path):
             font = ImageFont.truetype(fontpath, pt)
             draw = ImageDraw.Draw(im)
             draw.text((pt,pt), dir_path.split('/')[-1], fill=(0,0,0,0), font=font)
+            if os.path.exists(output_path):
+                append = True
+            else:
+                append = False
+            im.save(output_path, 'PDF', resolution=100, save_all=True, append=append)
             imgs.append(im)
-    if len(imgs) > 0:
-        if len(imgs) > 1:
-            append_images = imgs[1:]
-        else:
-            append_images = []
-        imgs[0].save(output_path, 'PDF', resolution=100, save_all=True, append_images=append_images)
 
 
 if __name__ == '__main__':
@@ -49,4 +48,6 @@ if __name__ == '__main__':
         if os.path.exists(path):
             paths.append(path)
 
-    stitch(paths, args.image_names, p.outdir + '/' + args.output_name)
+    if os.path.exists(args.output_name):
+        os.remove(args.output_name)
+    stitch(paths, args.image_names, args.output_name)
