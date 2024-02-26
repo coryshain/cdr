@@ -22,6 +22,55 @@ def joint_scale(a, b):
     return a/scaling_factor, b/scaling_factor
 
 
+def get_summary(
+        a_model,
+        b_model,
+        a_perf,
+        b_perf,
+        base_diff,
+        p_value,
+        metric,
+        partition_str,
+        n,
+        a_ensemble_size=None,
+        b_ensemble_size=None,
+        agg_fn=None,
+        r1=None,
+        r2=None,
+        rx=None
+    ):
+    summary = '='*50 + '\n'
+    summary += 'Model comparison:      %s vs %s\n' % (a_model, b_model)
+    summary += 'Partition:             %s\n' % partition_str
+    summary += 'Metric:                %s\n' % metric
+    if a_ensemble_size is not None or b_ensemble_size is not None:
+        if agg_fn is not None:
+            summary += 'Ensemble agg fn:       %s\n' % agg_fn
+        if a_ensemble_size is not None:
+            summary += 'Model A ensemble size: %s\n' % a_ensemble_size
+        if b_ensemble_size is not None:
+            summary += 'Model B ensemble size: %s\n' % b_ensemble_size
+    summary += 'n: %s\n' % n
+    if r1 is not None:
+        summary += 'r(a,y):                %s\n' % r1
+    if r2 is not None:
+        summary += 'r(b,y):                %s\n' % r2
+    if rx is not None:
+        summary += 'r(a,b):            %s\n' % rx
+    summary += 'Model A:               %s\n' % a_model
+    summary += 'Model B:               %s\n' % b_model
+    summary += 'Model A score:         %.4f\n' % a_perf
+    summary += 'Model B score:         %.4f\n' % b_perf
+    summary += 'Difference:            %.4f\n' % base_diff
+    summary += 'p:                     %.4e%s\n' % (p_value, '' if p_value > 0.05 \
+        else '*' if p_value > 0.01 else '**' if p_value > 0.001 else '***')
+    summary += '='*50 + '\n'
+
+    return summary
+
+
+
+
 if __name__ == '__main__':
     argparser = argparse.ArgumentParser('''
         Performs pairwise permutation test for significance of differences in prediction quality between models.
@@ -31,9 +80,8 @@ if __name__ == '__main__':
     argparser.add_argument('config_paths', nargs='*', help='Path(s) to configuration (*.ini) file')
     argparser.add_argument('-m', '--models', nargs='*', default=[], help='List of models (or model basenames if using -a) to compare. Regex permitted. If unspecified, uses all models.')
     argparser.add_argument('-n', '--n_iter', type=int, default=10000, help='Number of resampling iterations.')
-    argparser.add_argument('-P', '--pool', action='store_true', help='Pool test statistic across models by basename using all ablation configurations common to all configs in ``config_paths``. Only applied to models that are (i) named identically across config files an (ii) have evaluation data for the relevant partition for every config file.')
+    argparser.add_argument('-P', '--pool', action='store_true', help='Pool test statistic by model name across config files (experiments). Only applied to models that are (i) named identically across config files an (ii) have evaluation data for the relevant partition for every config file.')
     argparser.add_argument('-a', '--ablation', action='store_true', help='Only compare models within an ablation set (those defined using the "ablate" param in the config file)')
-    argparser.add_argument('-A', '--ablation_components', type=str, nargs='*', help='Names of variables to consider in ablative tests. Useful for excluding some ablated models from consideration')
     argparser.add_argument('-p', '--partition', type=str, default='dev', help='Name of partition to use (one of "train", "dev", "test")')
     argparser.add_argument('-g', '--agg', type=str, default='median', help='Aggregation function to use over ensembles. E.g., ``"mean"``, ``"median"``, ``"min"``, ``"max"``.')
     argparser.add_argument('-M', '--metric', type=str, default='loglik', help='Metric to use for comparison ("mse", "loglik", or "corr")')
@@ -49,11 +97,7 @@ if __name__ == '__main__':
         metric = 'loglik'
     assert metric in ['mse', 'loglik', 'corr'], 'Metric must be one of ["mse", "loglik", "corr"].'
 
-    if args.pool:
-        exps_outdirs = []
-
-    ablation_components = args.ablation_components
-
+    exps_outdirs = []
     partitions = get_partition_list(args.partition)
     partition_str = '-'.join(partitions)
 
@@ -62,7 +106,7 @@ if __name__ == '__main__':
         p = Config(path)
         exps_outdirs.append(p.outdir)
 
-        model_list = sorted(set(p.model_list) | set(p.ensemble_list))
+        model_list = sorted(set(p.model_names) | set(p.ensemble_names) | set(p.crossval_family_names))
         models = filter_models(model_list, args.models)
         cdr_models = [x for x in filter_models(models, cdr_only=True)]
 
@@ -73,25 +117,16 @@ if __name__ == '__main__':
                 if model_basename not in comparison_sets:
                     comparison_sets[model_basename] = []
                 comparison_sets[model_basename].append(model_name)
-            for model_name in p.model_list:
+            for model_name in p.model_names:
                 model_basename = model_name.split('!')[0]
                 if model_basename in comparison_sets and model_name not in comparison_sets[model_basename]:
-                    if ablation_components is None or len(ablation_components) > 0:
-                        components = model_name.split('!')[1:]
-                        hit = True
-                        for c in components:
-                            if ablation_components is not None and c not in ablation_components:
-                                hit = False
-                        if hit:
-                            comparison_sets[model_basename].append(model_name)
-                    else:
-                        comparison_sets[model_basename].append(model_name)
+                    comparison_sets[model_basename].append(model_name)
             if pooled_comparison_sets is None:
                 pooled_comparison_sets = comparison_sets.copy()
             else:
                 for comparison_set in comparison_sets:
                     if comparison_set not in pooled_comparison_sets:
-                        del pooled_comparison_set[comparison_set]
+                        del pooled_comparison_sets[comparison_set]
                     else:
                         pooled_comparison_sets[comparison_set] = sorted(list(set(pooled_comparison_sets[comparison_set]) & set(comparison_sets[comparison_set])))
         else:
@@ -203,26 +238,23 @@ if __name__ == '__main__':
                                             out_path = outdir + '/' + name_base + '.txt'
                                             with open(out_path, 'w') as f:
                                                 stderr('Saving output to %s...\n' % out_path)
-
-                                                summary = '='*50 + '\n'
-                                                summary += 'Model comparison: %s vs %s\n' % (a_model, b_model)
-                                                summary += 'Partition:  %s\n' % partition_str
-                                                summary += 'Metric:     %s\n' % metric
-                                                if a.shape[1] > 1:
-                                                    summary += 'Ens agg fn: %s\n' % args.agg 
-                                                summary += 'n:          %s\n' % a.shape[0]
-                                                if r1 is not None:
-                                                    summary += 'r(a,y):     %s\n' % r1
-                                                if r2 is not None:
-                                                    summary += 'r(b,y):     %s\n' % r2
-                                                if rx is not None:
-                                                    summary += 'r(a,b):     %s\n' % rx
-                                                summary += 'Model A:    %.4f\n' % a_perf
-                                                summary += 'Model B:    %.4f\n' % b_perf
-                                                summary += 'Difference: %.4f\n' % base_diff
-                                                summary += 'p:          %.4e%s\n' % (p_value, '' if p_value > 0.05 \
-                                                    else '*' if p_value > 0.01 else '**' if p_value > 0.001 else '***')
-                                                summary += '='*50 + '\n'
+                                                summary = get_summary(
+                                                        a_model,
+                                                        b_model,
+                                                        a_perf,
+                                                        b_perf,
+                                                        base_diff,
+                                                        p_value,
+                                                        metric,
+                                                        partition_str,
+                                                        a.shape[0],
+                                                        a_ensemble_size=a.shape[1],
+                                                        b_ensemble_size=b.shape[1],
+                                                        agg_fn=args.agg,
+                                                        r1=r1,
+                                                        r2=r2,
+                                                        rx=rx
+                                                    )
 
                                                 f.write(summary)
                                                 sys.stdout.write(summary)
@@ -270,7 +302,6 @@ if __name__ == '__main__':
                                 if response not in pooled_data[s][exp_outdir][m]:
                                     pooled_data[s][exp_outdir][m][response] = {}
                                 pooled_data[s][exp_outdir][m][response][filenum] = v
-
 
         for s in pooled_comparison_sets:
             model_set = pooled_comparison_sets[s]
@@ -364,33 +395,24 @@ if __name__ == '__main__':
                             out_path = outdir + '/' + name_base + '.txt'
                             with open(out_path, 'w') as f:
                                 stderr('Saving output to %s...\n' % out_path)
-        
-                                summary = '=' * 50 + '\n'
-                                summary += 'Model comparison: %s vs %s\n' % (a_name, b_name)
-                                summary += 'Partition: %s\n' % partition_str
-                                summary += 'Metric: %s\n' % metric
-                                if a.shape[1] > 1:
-                                    summary += 'Ens agg fn: %s\n' % args.agg 
-                                summary += 'Experiments pooled:\n'
-                                for exp in exps_outdirs:
-                                    summary += '  %s\n' % exp
-                                summary += 'n:          %s\n' % a.shape[0]
-                                if r1 is not None:
-                                    summary += 'r(a,y):     %s\n' % r1
-                                if r2 is not None:
-                                    summary += 'r(b,y):     %s\n' % r2
-                                if rx is not None:
-                                    summary += 'r(a,b):     %s\n' % rx
-                                summary += 'Model A:    %.4f\n' % a_perf
-                                summary += 'Model B:    %.4f\n' % b_perf
-                                summary += 'Difference: %.4f\n' % diff
-                                summary += 'p: %.4e%s\n' % (
-                                    p_value,
-                                    '' if p_value > 0.05 else '*' if p_value > 0.01
-                                    else '**' if p_value > 0.001 else '***'
+                                summary = get_summary(
+                                        a_name,
+                                        b_name,
+                                        a_perf,
+                                        b_perf,
+                                        diff,
+                                        p_value,
+                                        metric,
+                                        partition_str,
+                                        a.shape[0],
+                                        a_ensemble_size=a.shape[1],
+                                        b_ensemble_size=b.shape[1],
+                                        agg_fn=args.agg,
+                                        r1=r1,
+                                        r2=r2,
+                                        rx=rx
                                 )
-                                summary += '=' * 50 + '\n'
-        
+         
                                 f.write(summary)
                                 sys.stdout.write(summary)
         

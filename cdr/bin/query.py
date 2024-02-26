@@ -97,7 +97,7 @@ if __name__ == '__main__':
         if not p.use_gpu_if_available or args.cpu_only:
             os.environ['CUDA_VISIBLE_DEVICES'] = '-1'
 
-        model_list = sorted(set(p.model_list) | set(p.ensemble_list))
+        model_list = sorted(set(p.model_names) | set(p.ensemble_names))
         models = filter_models(model_list, args.models, cdr_only=True)
 
         for m in models:

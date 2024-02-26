@@ -85,7 +85,7 @@ def get_JTPS_optimizer_class(base_optimizer_class, session=None):
     with session.as_default():
         with session.graph.as_default():
             class JTPSOptimizer(base_optimizer_class):
-                def __init__(self, *args, meta_learning_rate=None, granularity='cell', constraint_fn='softplus', **kwargs):
+                def __init__(self, *args, meta_learning_rate=None, granularity='global', constraint_fn='softplus', **kwargs):
                     super(JTPSOptimizer, self).__init__(*args, **kwargs)
                     if meta_learning_rate is None:
                         if len(args) > 0:
@@ -174,11 +174,6 @@ def get_JTPS_optimizer_class(base_optimizer_class, session=None):
                         self._zeros_slot(v, 'delta', self._name)
                         self._zeros_slot(v, 'theta', self._name)
                         if self.granularity == 'cell':
-                            print(v)
-                            print(v.dtype)
-                            print(v.dtype._is_ref_dtype)
-                            print()
-
                             self._get_or_make_slot_with_initializer(
                                 v,
                                 tf.constant_initializer(fn_inv(1.).eval(session=session)),

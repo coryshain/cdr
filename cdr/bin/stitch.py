@@ -20,18 +20,17 @@ def stitch(dir_paths, image_names, output_path):
             font = ImageFont.truetype(fontpath, pt)
             draw = ImageDraw.Draw(im)
             draw.text((pt,pt), dir_path.split('/')[-1], fill=(0,0,0,0), font=font)
+            if os.path.exists(output_path):
+                append = True
+            else:
+                append = False
+            im.save(output_path, 'PDF', resolution=100, save_all=True, append=append)
             imgs.append(im)
-    if len(imgs) > 0:
-        if len(imgs) > 1:
-            append_images = imgs[1:]
-        else:
-            append_images = []
-        imgs[0].save(output_path, 'PDF', resolution=100, save_all=True, append_images=append_images)
 
 
 if __name__ == '__main__':
     argparser = argparse.ArgumentParser('''
-        Stitches plots from CDR models into a single PDF, making it easy to page through estimated IRF.
+        Stitches plots from CDR models into a single PDF, making it easy to page through estimated IRFs.
     ''')
     argparser.add_argument('config_path', help='Path to configuration (*.ini) file')
     argparser.add_argument('-m', '--models', nargs='*', default=[], help='List of models for which to stitch plots. Regex permitted. If unspecified, stitches all CDR models.')
@@ -41,7 +40,7 @@ if __name__ == '__main__':
 
     p = Config(args.config_path)
 
-    models = filter_models(p.model_list, args.models, cdr_only=True)
+    models = filter_models(p.model_names, args.models, cdr_only=True)
 
     paths = []
     for m in models:
@@ -49,4 +48,6 @@ if __name__ == '__main__':
         if os.path.exists(path):
             paths.append(path)
 
-    stitch(paths, args.image_names, p.outdir + '/' + args.output_name)
+    if os.path.exists(args.output_name):
+        os.remove(args.output_name)
+    stitch(paths, args.image_names, args.output_name)

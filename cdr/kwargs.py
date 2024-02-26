@@ -287,16 +287,16 @@ MODEL_INITIALIZATION_KWARGS = [
         'use_distributional_regression',
         False,
         bool,
-        "Whether to model all parameters of the predictive distribution as dependent on IRFs of the impulses (distributional regression). If ``False``, only the mean depends on the predictors (other parameters of the predictive distribution are treated as constant).",
+        "Whether to model all parameters of the response distribution as dependent on IRFs of the impulses (distributional regression). If ``False``, only the mean depends on the predictors (other parameters of the response distribution are treated as constant).",
         aliases=['heteroscedastic', 'heteroskedastic'],
         default_value_cdrnn=True
     ),
     Kwarg(
-        'predictive_distribution_map',
+        'response_distribution_map',
         None,
         [str, None],
-        "Definition of predictive distribution. Can be a single distribution name (shared across all response variables), a space-delimited list of distribution names (one per response variable), a space-delimited list of ';'-delimited tuples matching response variables to distribution names (e.g. ``response;Bernoulli``), or ``None``, in which case the predictive distribution will be inferred as ``Normal`` for continuous variables and ``Categorical`` for categorical variables.",
-        aliases=['predictive_distribution', 'pred_dist']
+        "Definition of response distribution. Can be a single distribution name (shared across all response variables), a space-delimited list of distribution names (one per response variable), a space-delimited list of ';'-delimited tuples matching response variables to distribution names (e.g. ``response;Bernoulli``), or ``None``, in which case the response distribution will be inferred as ``JohnsonSU`` for continuous variables and ``Categorical`` for categorical variables.",
+        aliases=['response_distribution', 'predictive_distribution_map', 'predictive_distribution', 'pred_dist']
     ),
     Kwarg(
         'center_inputs',
@@ -306,7 +306,7 @@ MODEL_INITIALIZATION_KWARGS = [
     ),
     Kwarg(
         'rescale_inputs',
-        False,
+        True,
         bool,
         "Rescale input features by dividing by training set standard deviation. Can improve convergence speed and reduce vulnerability to local optima. Only affects fitting -- prediction, likelihood computation, and plotting are reported on the source values.",
         aliases=['scale_inputs'],
@@ -332,12 +332,6 @@ MODEL_INITIALIZATION_KWARGS = [
     ),
 
     # MODEL DEFINITION
-    Kwarg(
-        'asymmetric_error',
-        False,
-        bool,
-        "Whether to model numeric responses by default with an (asymmetric) SinhArcshin transform of the Normal distribution. Otherwise, defaults to a Normal distribution. Only affects response variables whose distributions have not been explicitly specified using **predictive_distribution_map**."
-    ),
     Kwarg(
         'constraint',
         'softplus',
@@ -431,11 +425,11 @@ MODEL_INITIALIZATION_KWARGS = [
         "Epsilon parameter to use for numerical stability in bounded parameter estimation (imposes a positive lower bound on the parameter)."
     ),
     Kwarg(
-        'pred_dist_epsilon',
-        1e-2,
+        'response_dist_epsilon',
+        1e-5,
         float,
-        "Epsilon parameter to use for numerical stability in bounded parameters of the predictive distribution (imposes a positive lower bound on the parameter).",
-        aliases=['epsilon']
+        "Epsilon parameter to use for numerical stability in bounded parameters of the response distribution (imposes a positive lower bound on the parameter).",
+        aliases=['pred_dist_epsilon', 'epsilon']
     ),
     Kwarg(
         'optim_epsilon',
@@ -447,7 +441,8 @@ MODEL_INITIALIZATION_KWARGS = [
         'learning_rate',
         0.001,
         float,
-        "Initial value for the learning rate."
+        "Initial value for the learning rate.",
+        default_value_cdrnn=0.01
     ),
     Kwarg(
         'learning_rate_min',
@@ -459,31 +454,36 @@ MODEL_INITIALIZATION_KWARGS = [
         'lr_decay_family',
         None,
         [str, None],
-        "Functional family for the learning rate decay schedule (no decay if ``None``)."
+        "Functional family for the learning rate decay schedule (no decay if ``None``).",
+        aliases=['learning_rate_decay_family']
     ),
     Kwarg(
         'lr_decay_rate',
-        0.,
+        1.,
         float,
-        "coefficient by which to decay the learning rate every ``lr_decay_steps`` (ignored if ``lr_decay_family==None``)."
+        "coefficient by which to decay the learning rate every ``lr_decay_steps`` (ignored if ``lr_decay_family==None``).",
+        aliases=['learning_rate_decay_rate']
     ),
     Kwarg(
         'lr_decay_steps',
-        25,
+        100,
         int,
-        "Span of iterations over which to decay the learning rate by ``lr_decay_rate`` (ignored if ``lr_decay_family==None``)."
+        "Span of iterations over which to decay the learning rate by ``lr_decay_rate`` (ignored if ``lr_decay_family==None``).",
+        aliases=['learning_rate_decay_steps']
     ),
     Kwarg(
         'lr_decay_iteration_power',
-        1,
+        0.5,
         float,
-        "Power to which the iteration number ``t`` should be raised when computing the learning rate decay."
+        "Power to which the iteration number ``t`` should be raised when computing the learning rate decay.",
+        aliases=['learning_rate_decay_iteration_power']
     ),
     Kwarg(
         'lr_decay_staircase',
         False,
         bool,
-        "Keep learning rate flat between ``lr_decay_steps`` (ignored if ``lr_decay_family==None``)."
+        "Keep learning rate flat between ``lr_decay_steps`` (ignored if ``lr_decay_family==None``).",
+        aliases=['learning_rate_decay_staircase']
     ),
     Kwarg(
         'filter_outlier_losses',
@@ -511,7 +511,7 @@ MODEL_INITIALIZATION_KWARGS = [
         500,
         [int, None],
         "Number of timesteps over which to average parameter movements for convergence diagnostics. If ``None`` or ``0``, convergence will not be programmatically checked (reduces memory overhead, but convergence must then be visually diagnosed).",
-        default_value_cdrnn=250
+        default_value_cdrnn=100
     ),
     Kwarg(
         'convergence_stride',
@@ -527,7 +527,7 @@ MODEL_INITIALIZATION_KWARGS = [
     ),
     Kwarg(
         'early_stopping',
-        False,
+        True,
         bool,
         "Whether to diagnose convergence based on dev set performance (``True``) or training set performance (``False``)."
     ),
@@ -593,7 +593,7 @@ MODEL_INITIALIZATION_KWARGS = [
         'inherit',
         [str, float, 'inherit'],
         "Scale of random effects regularizer (ignored if ``regularizer_name==None``). If ``'inherit'``, inherits **regularizer_scale**. Regularization only applies to random effects without variational priors.",
-        default_value_cdrnn=10.
+        default_value_cdrnn=100.
     ),
     Kwarg(
         'regularize_mean',
@@ -611,13 +611,13 @@ MODEL_INITIALIZATION_KWARGS = [
     ),
     Kwarg(
         'plot_freq',
-        100,
+        10,
         int,
         "Frequency (in iterations) with which to plot model estimates (or ``0`` to turn off incremental plotting)."
     ),
     Kwarg(
         'eval_freq',
-        0,
+        10,
         int,
         "Frequency (in iterations) with which to evaluate on dev data (or ``0`` to turn off incremental evaluation)."
     ),
@@ -674,7 +674,7 @@ MODEL_INITIALIZATION_KWARGS = [
     ),
     Kwarg(
         'plot_step_default',
-        1.,
+        'sd',
         [str, float],
         "Default size of step to take above reference in univariate IRF plots, if not specified in **plot_step**. Either a float or the string ``'sd'``, which indicates training sample standard deviation."
     ),
@@ -686,7 +686,7 @@ MODEL_INITIALIZATION_KWARGS = [
     ),
     Kwarg(
         'plot_n_time_units',
-        5,
+        1,
         float,
         "Number of time units to use for plotting."
     ),
@@ -695,6 +695,12 @@ MODEL_INITIALIZATION_KWARGS = [
         1024,
         int,
         "Resolution of plot axis (for 3D plots, uses sqrt of this number for each axis)."
+    ),
+    Kwarg(
+        'plot_dirac',
+        False,
+        bool,
+        "Whether to include any Dirac delta IRF's (stick functions at t=0) in plot."
     ),
     Kwarg(
         'plot_x_inches',
@@ -731,7 +737,7 @@ MODEL_INITIALIZATION_KWARGS = [
     ),
     Kwarg(
         'generate_curvature_plots',
-        False,
+        True,
         bool,
         "Whether to plot IRF curvature at time **reference_time**."
     ),
@@ -928,7 +934,7 @@ NN_KWARGS = [
     ),
     Kwarg(
         'rescale_X_time',
-        False,
+        True,
         bool,
         "Whether to rescale time values as inputs by their training SD under the hood. Times are automatically reconverted back to the source scale for plotting and model criticism.",
         aliases=['rescale_time', 'rescale_time_X'],
@@ -940,6 +946,13 @@ NN_KWARGS = [
         bool,
         "Whether to rescale time offset values by their training SD under the hood. Offsets are automatically reconverted back to the source scale for plotting and model criticism.",
         aliases=['rescale_time', 'rescale_tdelta']
+    ),
+    Kwarg(
+        'nn_use_input_scaler',
+        False,
+        bool,
+        "Whether to apply a Hadamard scaling layer to the inputs to any NN components.",
+        aliases=['use_input_scaler']
     ),
     Kwarg(
         'log_transform_t_delta',
@@ -964,7 +977,7 @@ NN_KWARGS = [
     ),
     Kwarg(
         'n_units_ff',
-        32,
+        128,
         [int, str, None],
         "Number of units per feedforward encoder hidden layer. Can be an ``int``, which will be used for all layers, or a ``str`` with **n_layers_rnn** space-delimited integers, one for each layer in order from bottom to top. If ``0`` or ``None``, no feedforward encoder.",
         aliases=['n_units', 'n_units_encoder', 'n_units_input_projection']
@@ -1002,7 +1015,7 @@ NN_KWARGS = [
     ),
     Kwarg(
         'n_units_irf',
-        32,
+        128,
         [int, str, None],
         "Number of units per hidden layer in IRF. Can be an ``int``, which will be used for all layers, or a ``str`` with **n_units_irf** space-delimited integers, one for each layer in order from bottom to top. If ``0`` or ``None``, no hidden layers.",
         aliases=['n_units', 'n_units_decoder']
@@ -1111,8 +1124,16 @@ NN_KWARGS = [
     Kwarg(
         'batch_normalization_decay',
         None,
-        [float, None],
-        "Decay rate to use for batch normalization in internal layers. If ``None``, no batch normalization.",
+        [bool, float, None],
+        "Decay rate to use for batch normalization in internal layers. If ``True``, uses decay ``0.999``. If ``False`` or ``None``, no batch normalization.",
+        aliases=['batch_normalization', 'batch_norm']
+    ),
+    Kwarg(
+        'layer_normalization_type',
+        'z',
+        [bool, str, None],
+        "Type of layer normalization, one of ``['z', 'length', None]``. If ``'z'``, classical z-transform-based normalization. If ``'length'``, normalize by the norm of the activation vector. If ``True``, uses ``'z'``. If ``False`` or ``None``, no layer normalization.",
+        aliases=['layer_normalization', 'layer_norm']
     ),
     Kwarg(
         'normalize_ff',
@@ -1129,41 +1150,47 @@ NN_KWARGS = [
     ),
     Kwarg(
         'normalize_after_activation',
-        True,
+        False,
         bool,
         "Whether to apply normalization (if applicable) after the non-linearity (otherwise, applied before).",
     ),
     Kwarg(
         'shift_normalized_activations',
-        False,
+        True,
         bool,
         "Whether to use trainable shift in batch/layer normalization layers.",
         aliases=['normalization_use_beta', 'batch_normalization_use_beta', 'layer_normalization_use_beta']
     ),
     Kwarg(
         'rescale_normalized_activations',
-        False,
+        True,
         bool,
         "Whether to use trainable scale in batch/layer normalization layers.",
         aliases=['normalization_use_gamma', 'batch_normalization_use_gamma', 'layer_normalization_use_gamma']
     ),
     Kwarg(
-        'layer_normalization_type',
-        None,
-        [str, None],
-        "Type of layer normalization, one of ``['z', 'length', None]``. If ``'z'``, classical z-transform-based normalization. If ``'length'``, normalize by the norm of the activation vector. If ``None``, no layer normalization. Incompatible with batch normalization.",
+        'normalize_inputs',
+        False,
+        bool,
+        "Whether to apply normalization (if applicable) to the inputs.",
+    ),
+    Kwarg(
+        'normalize_final_layer',
+        False,
+        bool,
+        "Whether to apply normalization (if applicable) to the final layer.",
     ),
 
     # REGULARIZATION
     Kwarg(
         'nn_regularizer_name',
-        'l2_regularizer',
+        None,
         [str, 'inherit', None],
         "Name of weight regularizer (e.g. ``l1_regularizer``, ``l2_regularizer``); overrides **regularizer_name**. If ``'inherit'``, inherits **regularizer_name**. If ``None``, no regularization."
     ),
     Kwarg(
         'nn_regularizer_scale',
-        5.,
+        1.,
         [str, float, 'inherit'],
         "Scale of weight regularizer (ignored if ``regularizer_name==None``). If ``'inherit'``, inherits **regularizer_scale**."
     ),
@@ -1245,7 +1272,7 @@ NN_KWARGS = [
     ),
     Kwarg(
         'ff_dropout_rate',
-        0.1,
+        0.5,
         [float, None],
         "Rate at which to drop neurons of FF projection.",
         aliases=['dropout', 'dropout_rate', 'input_projection_dropout_rate', 'h_in_dropout_rate']
@@ -1264,28 +1291,28 @@ NN_KWARGS = [
     ),
     Kwarg(
         'h_rnn_dropout_rate',
-        0.1,
+        0.5,
         [float, None],
         "Rate at which to drop neurons of h_rnn.",
         aliases=['dropout', 'dropout_rate']
     ),
     Kwarg(
         'rnn_dropout_rate',
-        0.1,
+        0.5,
         [float, None],
         "Rate at which to entirely drop the RNN.",
         aliases=['dropout', 'dropout_rate']
     ),
     Kwarg(
         'irf_dropout_rate',
-        0.1,
+        0.5,
         [float, None],
         "Rate at which to drop neurons of IRF layers.",
         aliases=['dropout', 'dropout_rate']
     ),
     Kwarg(
         'ranef_dropout_rate',
-        0.1,
+        None,
         [float, None],
         "Rate at which to drop random effects indicators.",
         aliases=['dropout', 'dropout_rate']
@@ -1403,56 +1430,56 @@ PLOT_KWARGS_CORE = [
         'response_params',
         None,
         [str, None],
-        "Name(s) of parameter(s) of predictive distribution to plot for each response variable. If ``None``, plots the first parameter only. Parameter names not present in a given distribution will be skipped."
+        "Name(s) of parameter(s) of response distribution to plot for each response variable. If ``None``, plots the first parameter only. Parameter names not present in a given distribution will be skipped."
     ),
     Kwarg(
         'generate_univariate_irf_plots',
-        True,
-        bool,
-        "Whether to plot univariate IRFs over time.",
+        None,
+        [bool, None],
+        "Whether to plot univariate IRFs over time. If ``None``, use model defaults.",
         aliases=['generate_univariate_IRF_plots']
     ),
     Kwarg(
         'generate_univariate_irf_heatmaps',
-        False,
-        bool,
-        "Whether to plot univariate IRF heatmaps over time.",
+        None,
+        [bool, None],
+        "Whether to plot univariate IRF heatmaps over time. If ``None``, use model defaults.",
         aliases=['generate_univariate_IRF_heatmaps']
     ),
     Kwarg(
         'generate_curvature_plots',
-        True,
-        bool,
-        "Whether to plot IRF curvature at time **reference_time**."
+        None,
+        [bool, None],
+        "Whether to plot IRF curvature at time **reference_time**. If ``None``, use model defaults."
     ),
     Kwarg(
         'generate_irf_surface_plots',
-        True,
-        bool,
-        "Whether to plot IRF surfaces.",
+        None,
+        [bool, None],
+        "Whether to plot IRF surfaces. If ``None``, use model defaults.",
         aliases=['generate_IRF_surface_plots']
     ),
     Kwarg(
         'generate_interaction_surface_plots',
-        False,
-        bool,
-        "Whether to plot IRF interaction surfaces at time **reference_time**."
+        None,
+        [bool, None],
+        "Whether to plot IRF interaction surfaces at time **reference_time**. If ``None``, use model defaults."
     ),
     Kwarg(
         'generate_err_dist_plots',
-        False,
-        bool,
-        "Whether to plot the average error distribution for real-valued responses."
+        None,
+        [bool, None],
+        "Whether to plot the average error distribution for real-valued responses. If ``None``, use model defaults."
     ),
     Kwarg(
         'generate_nonstationarity_surface_plots',
-        True,
-        bool,
-        "Whether to plot IRF surfaces showing non-stationarity in the response."
+        None,
+        [bool, None],
+        "Whether to plot IRF surfaces showing non-stationarity in the response. If ``None``, use model defaults."
     ),
     Kwarg(
         'n_samples',
-        None,
+        1000,
         [int, None],
         "Number of posterior samples to draw if Bayesian, ignored otherwise. If ``None``, use model defaults."
     ),
@@ -1470,21 +1497,21 @@ PLOT_KWARGS_CORE = [
     ),
     Kwarg(
         'plot_step',
-        '',
-        str,
-        "Size of step by predictor to take above reference in univariate IRF plots. Structured as space-delimited pairs ``NAME=FLOAT``. Any predictor without a specified step size will inherit from **plot_step_default**."
+        None,
+        [str, None],
+        "Size of step by predictor to take above reference in univariate IRF plots. Structured as space-delimited pairs ``NAME=FLOAT``. Any predictor without a specified step size will inherit from **plot_step_default**. If ``None``, use model defaults."
     ),
     Kwarg(
         'plot_step_default',
-        1.,
-        [str, float],
-        "Default size of step to take above reference in univariate IRF plots, if not specified in **plot_step**. Either a float or the string ``'sd'``, which indicates training sample standard deviation."
+        None,
+        [str, float, None],
+        "Default size of step to take above reference in univariate IRF plots, if not specified in **plot_step**. Either a float or the string ``'sd'``, which indicates training sample standard deviation. If ``None``, use model defaults."
     ),
     Kwarg(
         'reference_time',
-        0.,
-        float,
-        "Timepoint at which to plot interactions."
+        None,
+        [float, None],
+        "Timepoint at which to plot interactions. If ``None``, use model defaults."
     ),
     Kwarg(
         'reference_type',
@@ -1546,27 +1573,27 @@ PLOT_KWARGS_CORE = [
     # AESTHETICS
     Kwarg(
         'plot_n_time_units',
-        5,
-        float,
-        "Number of time units to use for plotting."
+        None,
+        [float, None],
+        "Number of time units to use for plotting. If ``None``, use model defaults."
     ),
     Kwarg(
         'plot_n_time_points',
-        1024,
-        int,
-        "Resolution of plot axis (for 3D plots, uses sqrt of this number for each axis)."
+        None,
+        [int, None],
+        "Resolution of plot axis (for 3D plots, uses sqrt of this number for each axis). If ``None``, use model defaults."
     ),
     Kwarg(
         'plot_x_inches',
-        6.,
-        float,
-        "Width of plot in inches."
+        None,
+        [float, None],
+        "Width of plot in inches. If ``None``, use model defaults."
     ),
     Kwarg(
         'plot_y_inches',
-        4.,
-        float,
-        "Height of plot in inches."
+        None,
+        [float, None],
+        "Height of plot in inches. If ``None``, use model defaults"
     ),
     Kwarg(
         'ylim',
@@ -1588,9 +1615,9 @@ PLOT_KWARGS_CORE = [
     ),
     Kwarg(
         'use_legend',
-        True,
-        bool,
-        "Whether to add legend to univariate IRF plots.",
+        None,
+        [bool, None],
+        "Whether to add legend to univariate IRF plots. If ``None``, use model defaults.",
         aliases=['legend']
     ),
     Kwarg(
@@ -1607,15 +1634,15 @@ PLOT_KWARGS_CORE = [
     ),
     Kwarg(
         'cmap',
-        'gist_rainbow',
-        str,
-        "Name of MatPlotLib cmap specification to use for plotting (determines the color of lines in the plot)."
+        None,
+        [str, None],
+        "Name of MatPlotLib cmap specification to use for plotting (determines the color of lines in the plot). If ``None``, use model defaults."
     ),
     Kwarg(
         'dpi',
-        300,
-        int,
-        "Dots per inch of saved plot image file."
+        None,
+        [int, None],
+        "Dots per inch of saved plot image file. If ``None``, use model defaults."
     ),
     Kwarg(
         'prefix',
@@ -1624,7 +1651,7 @@ PLOT_KWARGS_CORE = [
         "Prefix string to prepend to plot image files."
     ),
     Kwarg(
-        'prefix',
+        'suffix',
         '.png',
         str,
         "File extension to use for plot outputs."

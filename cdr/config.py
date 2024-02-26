@@ -12,6 +12,10 @@ from .kwargs import MODEL_INITIALIZATION_KWARGS, BAYES_KWARGS, NN_BAYES_KWARGS, 
     PLOT_KWARGS_CORE, PLOT_KWARGS_OTHER
 
 
+PLOT_KEYS_CORE = [x.key for x in PLOT_KWARGS_CORE]
+PLOT_KEYS_OTHER = [x.key for x in PLOT_KWARGS_OTHER]
+
+
 # Thanks to Brice (https://stackoverflow.com/users/140264/brice) at Stack Overflow for this
 def powerset(iterable):
     xs = list(iterable)
@@ -46,14 +50,23 @@ class Config(object):
         # Data #
         ########
 
-        self.X_train = data.get('X_train')
+        self.X_train = data.get('X_train').split()
         self.X_dev = data.get('X_dev', None)
+        if self.X_dev:
+            self.X_dev = self.X_dev.split()
         self.X_test = data.get('X_test', None)
+        if self.X_test:
+            self.X_test = self.X_test.split()
 
         self.Y_train = data.get('Y_train', data.get('y_train', None))
         assert self.Y_train, 'Y_train must be provided'
+        self.Y_train = self.Y_train.split()
         self.Y_dev = data.get('Y_dev', data.get('y_dev', None))
+        if self.Y_dev:
+            self.Y_dev = self.Y_dev.split()
         self.Y_test = data.get('Y_test', data.get('y_test', None))
+        if self.Y_test:
+            self.Y_test = self.Y_test.split()
 
         sep = data.get('sep', ',')
         if sep.lower() in ['', "' '", '" "', 's', 'space']:
@@ -115,10 +128,8 @@ class Config(object):
 
         # Add ablations and crossval folds
         self.models = {}
-        self.model_list = []
-        self.ensembles = {}
-        self.ensemble_list = []
-        for model_field in [m for m in config.keys() if m.startswith('model_')]:
+        model_fields = [m for m in config.keys() if m.startswith('model_')]
+        for model_field in model_fields:
             model_name = model_field[6:]
             formula = Formula(config[model_field]['formula'])
             is_cdrnn = len(formula.nns_by_id) > 0
@@ -126,76 +137,39 @@ class Config(object):
                 reg_type = 'cdr'
             else:
                 reg_type = model_name.split('_')[0]
-            use_crossval = 'crossval_factor' in config[model_field]
-            if use_crossval:
-                model_configs = {}
-                folds = config[model_field]['crossval_folds'].split()
-                for fold in folds:
-                    levels = fold.split(';')
-                    fold_name = model_name + '_CV%s~%s' % (config[model_field]['crossval_factor'], '~'.join(levels))
-                    model_config = configparser.ConfigParser()
-                    model_config[model_field] = config[model_field]
-                    model_config = model_config[model_field]
-                    del model_config['crossval_folds']
-                    model_config['crossval_fold'] = fold
-                    model_configs[fold_name] = model_config
-            else:
-                model_configs = {model_name: config[model_field]}
-            _models = {}
-            _model_list = []
-            for model_name in model_configs:
-                model_config = model_configs[model_name]
-                model_settings = self.build_cdr_settings(
-                    model_config,
-                    global_settings=self.global_cdr_settings,
-                    is_cdr=reg_type=='cdr',
-                    is_cdrnn=is_cdrnn
-                )
-                _models[model_name] = model_settings
-                if reg_type == 'lme':
-                    _models[model_name]['correlated'] = config[model_field].getboolean('correlated', True)
-                _model_list.append(model_name)
-                if 'ablate' in config[model_field]:
-                    for ablated in powerset(config[model_field]['ablate'].strip().split()):
-                        ablated = list(ablated)
-                        new_name = model_name + '!' + '!'.join(ablated)
-                        formula = Formula(config[model_field]['formula'])
-                        formula.ablate_impulses(ablated)
-                        new_model = _models[model_name].copy()
-                        if reg_type == 'cdr':
-                            new_model['formula'] = str(formula)
-                        elif reg_type == 'lme':
-                            new_model['formula'] = formula.to_lmer_formula_string(
-                                z=False,
-                                correlated=_models[model_name]['correlated'],
-                                transform_dirac=False
-                            )
-                        else:
-                            raise ValueError('Ablation with reg_type "%s" not currently supported.' % reg_type)
-                        new_model['ablated'] = set(ablated)
-                        _models[new_name] = new_model
-                        _model_list.append(new_name)
-                if config[model_field].get('n_ensemble', config[model_field].get('n_ensembles', None)) \
-                        or 'n_ensemble' in cdr_settings:
-                    if 'n_ensemble' in config[model_field]:
-                        n_ensemble = config[model_field].getint('n_ensemble')
+            model_config = config[model_field]
+            model_settings = self.build_cdr_settings(
+                model_config,
+                global_settings=self.global_cdr_settings,
+                is_cdr=reg_type=='cdr',
+                is_cdrnn=is_cdrnn
+            )
+            self.models[model_name] = model_settings
+            if reg_type == 'lme':
+                self.models[model_name]['correlated'] = config[model_field].getboolean('correlated', True)
+            if 'ablate' in config[model_field]:
+                for ablated in powerset(config[model_field]['ablate'].strip().split()):
+                    ablated = list(ablated)
+                    new_name = model_name + '!' + '!'.join(ablated)
+                    formula = Formula(config[model_field]['formula'])
+                    formula.ablate_impulses(ablated)
+                    new_model = self.models[model_name].copy()
+                    if reg_type == 'cdr':
+                        new_model['formula'] = str(formula)
+                    elif reg_type == 'lme':
+                        new_model['formula'] = formula.to_lmer_formula_string(
+                            z=False,
+                            correlated=self.models[model_name]['correlated'],
+                            transform_dirac=False
+                        )
                     else:
-                        n_ensemble = cdr_settings.getint('n_ensemble')
-                    __models = {}
-                    __model_list = []
-                    for _m in _models:
-                        for i in range(n_ensemble):
-                            __models[_m + '.m%d' % i] = _models[_m]
-                    for _m in _model_list:
-                        for i in range(n_ensemble):
-                            __model_list.append(_m + '.m%d' % i)
-                    _models.update(__models)
-                    _model_list = __model_list
-                self.ensemble_list.append(model_name)
-                self.ensembles[model_name] = model_settings
+                        raise ValueError('Ablation with reg_type "%s" not currently supported.' % reg_type)
+                    new_model['ablated'] = set(ablated)
+                    self.models[new_name] = new_model
 
-                self.models.update(_models)
-                self.model_list += _model_list
+        self.ensembles = self.models.copy()
+        self.crossval_families = {}
+        self.expand_submodels()
 
         self.irf_name_map = {
             't_delta': 'Delay (s)',
@@ -212,11 +186,29 @@ class Config(object):
             return self.global_cdr_settings[item]
         if self.current_model in self.models:
             return self.models[self.current_model][item]
-        raise ValueError('There is no model named "%s" defined in the config file.' %self.current_model)
+        if self.current_model in self.ensembles:
+            return self.ensembles[self.current_model][item]
+        if self.current_model in self.crossval_families:
+            return self.crossval_families[self.current_model][item]
+        raise ValueError('There is no model named "%s" defined in the config file.' % self.current_model)
+
+    @property
+    def model_names(self):
+        return list(self.models.keys())
+
+    @property
+    def ensemble_names(self):
+        return list(self.ensembles.keys())
+
+    @property
+    def crossval_family_names(self):
+        return list(self.crossval_families.keys())
 
     def get(self, item, default=None):
         if (self.current_model is None and item in self.global_cdr_settings) or \
-                (self.current_model in self.models and item in self.models[self.current_model]):
+                (self.current_model in self.models and item in self.models[self.current_model]) or \
+                (self.current_model in self.ensembles and item in self.ensembles[self.current_model]) or \
+                (self.current_model in self.crossval_families and item in self.crossval_families[self.current_model]):
             return self[item]
         return default
 
@@ -236,7 +228,10 @@ class Config(object):
         :param model_name: ``str``; name of target model
         :return: ``None``
         """
-        if model_name is None or model_name in self.models:
+        if model_name is None or \
+                model_name in self.models or \
+                model_name in self.ensembles or\
+                model_name in self.crossval_families:
             self.current_model = model_name
         else:
             raise ValueError('There is no model named "%s" defined in the config file.' %model_name)
@@ -284,17 +279,76 @@ class Config(object):
 
         out['ablated'] = set()
 
+        # Ensembling settings
+        n_ensemble = settings.get('n_ensemble', global_settings.get('n_ensemble', None))
+        if isinstance(n_ensemble, str):
+            if n_ensemble.lower() == 'none':
+                n_ensemble = None
+            else:
+                n_ensemble = int(n_ensemble)
+        out['n_ensemble'] = n_ensemble
+
         # Cross validation settings
         out['crossval_factor'] = settings.get('crossval_factor', global_settings.get('crossval_factor', None))
-        if 'crossval_fold' in settings:
-            crossval_fold = settings['crossval_fold'].split(';')
-        elif 'crossval_fold' in global_settings:
-            crossval_fold = global_settings['crossval_fold']
-        else:
-            crossval_fold = []
-        out['crossval_fold'] = crossval_fold
+        crossval_folds = settings.get('crossval_folds', global_settings.get('crossval_folds', None))
+        if crossval_folds is None:
+            crossval_folds = []
+        elif isinstance(crossval_folds, str):
+            crossval_folds = crossval_folds.split()
+        assert not out['crossval_factor'] or crossval_folds, 'crossval_folds must also be provided when crossval_factor is used.'
+        if out['crossval_factor']:
+            assert len(crossval_folds) > 1, 'Must have at least 2 folds for crossval'
+        out['crossval_folds'] = crossval_folds
+        out['crossval_use_dev_fold'] = settings.get(
+            'crossval_use_dev_fold',
+            global_settings.get('crossval_use_dev_fold', False)
+        )
+        if out['crossval_use_dev_fold']:
+            assert (len(crossval_folds)) > 2, 'Must have at least 3 folds when ``crossval_use_dev_fold`` is ``True``.'
+        out['crossval_fold'] = None
+        out['crossval_dev_fold'] = None
 
         return out
+
+    def expand_submodels(self):
+        """
+        Expand models into cross-validation folds and/or ensembles.
+
+        return: ``None``
+        """
+
+        model_names = self.model_names.copy()
+        for model_name in model_names:
+            self.set_model(model_name)
+            model_config = self.models[model_name]
+            crossval_factor = self['crossval_factor']
+            crossval_folds = self['crossval_folds']
+            crossval_use_dev_fold = self['crossval_use_dev_fold']
+            n_ensemble = self['n_ensemble']
+            if crossval_factor:
+                crossval_dev_folds = crossval_folds[-1:] + crossval_folds[:-1]
+                del self.models[model_name]
+                del self.ensembles[model_name]
+                self.crossval_families[model_name] = model_config
+                for fold, dev_fold in zip(crossval_folds, crossval_dev_folds):
+                    _model_name = model_name + '.CV%s~%s' % (crossval_factor, fold)
+                    _model_config = model_config.copy()
+                    _model_config['crossval_fold'] = fold
+                    if crossval_use_dev_fold:
+                        _model_config['crossval_dev_fold'] = dev_fold
+                    self.ensembles[_model_name] = _model_config
+                    if n_ensemble is None:
+                        self.models[_model_name] = _model_config
+                    else:
+                        for i in range(n_ensemble):
+                            __model_name = _model_name + '.m%d' % i
+                            self.models[__model_name] = _model_config
+            else:
+                if n_ensemble is not None:
+                    del self.models[model_name]
+                    for i in range(n_ensemble):
+                        _model_name = model_name + '.m%d' % i
+                        self.models[_model_name] = model_config
 
 
 class PlotConfig(object):
@@ -306,8 +360,7 @@ class PlotConfig(object):
 
     def __init__(self, path=None):
         if path is None:
-            self.settings_core = {}
-            self.settings_other = {}
+            self.settings_core, self.settings_other = self.build_plot_settings({})
         else:
             config = configparser.ConfigParser()
             config.optionxform = str
@@ -321,6 +374,15 @@ class PlotConfig(object):
         if item in self.settings_core:
             return self.settings_core[item]
         return self.settings_other[item]
+
+    def __setitem__(self, key, value):
+        if key in PLOT_KEYS_CORE:
+            self.settings_core[key] = value
+        elif key in PLOT_KEYS_OTHER:
+            self.settings_other[key] = value
+        else:
+            raise ValueError('Attempted to set value for unrecognized plot kwarg %s' % key)
+        
 
     def get(self, item, default=None):
         if item in self.settings_core:
@@ -357,10 +419,14 @@ class PlotConfig(object):
                 elif kwarg.key == 'ylim' and val is not None:
                     val = tuple(float(x) for x in val.split())
                 out_core[kwarg.key] = val
+            else:
+                out_core[kwarg.key] = kwarg.default_value
 
         for kwarg in PLOT_KWARGS_OTHER:
             if kwarg.in_settings(settings):
                 val = kwarg.kwarg_from_config(settings)
                 out_other[kwarg.key] = val
+            else:
+                out_other[kwarg.key] = kwarg.default_value
 
         return out_core, out_other

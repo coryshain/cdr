@@ -74,20 +74,21 @@ if __name__ == '__main__':
             other = other.split('_')
             response = other[0]
             partition = other[-1][:-4]
-            result['comparison'] = '%s_v_%s' % (b, a)
-            result['response'] = response
-            result['partition'] = partition
-            with open(os.path.join(dir_path, result_path), 'r') as f:
-                for line in f:
-                    line = line.strip()
-                    if line.startswith('Difference:'):
-                        val = line.strip().split()[1]
-                        result['diff'] = int(round(-float(val)))
-                    elif line.startswith('p:'):
-                        val = line.strip().split()[1]
-                        result['p'] = float(val.replace('*', '')) 
-            _results.append(result)
-        results[dir_path] = _results
+            if not partitions or partition in partitions:
+                result['comparison'] = '%s_v_%s' % (b, a)
+                result['response'] = response
+                result['partition'] = partition
+                with open(os.path.join(dir_path, result_path), 'r') as f:
+                    for line in f:
+                        line = line.strip()
+                        if line.startswith('Difference:'):
+                            val = line.strip().split()[1]
+                            result['diff'] = int(round(-float(val)))
+                        elif line.startswith('p:'):
+                            val = line.strip().split()[1]
+                            result['p'] = float(val.replace('*', '')) 
+                _results.append(result)
+            results[dir_path] = _results
 
     datasets = list(results.keys())
     responses = {}
@@ -101,6 +102,15 @@ if __name__ == '__main__':
         for result in results[dataset]:
             response = result['response']
             comparison = result['comparison']
+            if comparison not in comparison2group:
+                if comparison not in comparison2group:
+                    comparison2group[comparison] = []
+                comparison2group[comparison].append(None)
+                if None not in group2comparison:
+                    group2comparison[None] = []
+                group2comparison[None].append(comparison)
+                if None not in group_order:
+                    group_order.append(None)
             partition = result['partition']
             if response not in responses[dataset]:
                 responses[dataset].append(response)

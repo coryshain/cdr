@@ -33,9 +33,33 @@ def extract_cdr_prediction_data(dirpath, metric='mse'):
     basename = os.path.basename(dirpath)
     parentdir = os.path.normpath(os.path.dirname(dirpath))
     modeldirs = []
+    use_crossval = False
+    folds = set()
+    ensembleids = set()
+    modeldir2fold = {}
+    modeldir2ensembleid = {}
     for x in os.listdir(parentdir):
-        if x == basename or (x.startswith(basename) and re.match('\.m\d+', x[len(basename):])):
-            modeldirs.append(os.path.join(parentdir, x))
+        if os.path.isdir(os.path.join(parentdir, x)):
+            ensemble = re.match('\.m\d+', x[len(basename):])
+            cv = re.match('\.CV[^.~]+~([^.~]+)(\.m(\d+))?', x[len(basename):])
+            if x == basename or \
+                    (x.startswith(basename) and (ensemble or cv)):
+                x_full = os.path.join(parentdir, x)
+
+                if cv:
+                    fold = cv.group(1)
+                    modeldir2fold[x] = fold
+                    folds.add(fold)
+
+                    ensembleid = cv.group(3)
+                    modeldir2ensembleid[x] = ensembleid
+                    ensembleids.add(ensembleid)
+
+                    use_crossval = True
+
+                modeldirs.append(x_full)
+    folds = sorted(list(folds))
+    ensembleids = sorted(list(ensembleids))
     if len(modeldirs) > 1: # Ensemble
         try:
             modeldirs.remove(os.path.normpath(dirpath))
@@ -98,8 +122,47 @@ def extract_cdr_prediction_data(dirpath, metric='mse'):
                     out[response][filenum][partition] = {}
                 if predtype not in out[response][filenum][partition]:
                     out[response][filenum][partition][predtype] = {}
-                if model_basename not in out[response][filenum][partition][predtype]:
+                if model_basename in out[response][filenum][partition][predtype]:
+                    raise ValueError('Found redundant results file: %s.' % data_path)
+                else:
                     out[response][filenum][partition][predtype][model_basename] = a
+
+    # Concatenate across crossval folds if needed
+    if use_crossval:
+        _out = {}
+        for response in out:
+            if response not in _out:
+                _out[response] = {}
+            for filenum in out[response]:
+                if filenum not in _out[response]:
+                    _out[response][filenum] = {}
+                for partition in out[response][filenum]:
+                    if partition not in _out[response][filenum]:
+                        _out[response][filenum][partition] = {}
+                    for predtype in out[response][filenum][partition]:
+                        if predtype not in _out[response][filenum][partition]:
+                            _out[response][filenum][partition][predtype] = {}
+                        ensembles = {}
+                        for model_basename in out[response][filenum][partition][predtype]:
+                            ensembleid = modeldir2ensembleid[model_basename]
+                            if ensembleid not in ensembles:
+                                ensembles[ensembleid] = {}
+                            fold = modeldir2fold[model_basename]
+                            if fold not in ensembles[ensembleid]:
+                                ensembles[ensembleid][fold] = out[response][filenum][partition][predtype][model_basename]
+                            else:
+                                raise ValueError('Found redundant results file: %s.' % model_basename)
+                        for ensembleid in ensembleids:
+                            outname = basename
+                            if ensembleid is not None:
+                                outname += '.m%s' % ensembleid
+                            ensemble = []
+                            for fold in folds:
+                                ensemble.append(ensembles[ensembleid][fold])
+                            ensemble = pd.concat(ensemble, axis=0).reset_index(drop=True)
+                            _out[response][filenum][partition][predtype][outname] = ensemble
+
+        out = _out
 
     return out
 
@@ -336,13 +399,20 @@ def paths_from_partition_cliarg(partition, config):
     }
 
     for p in partition:
-        X_path = X_map[p]
-        y_path = Y_map[p]
+        _X_paths = X_map[p]
+        _y_paths = Y_map[p]
 
-        if X_path not in X_paths:
-            X_paths.append(X_path)
-        if y_path not in y_paths:
-            y_paths.append(y_path)
+        assert _X_paths is not None, 'No data path provided for partition %s. If you did not intend to require ' + \
+                                     'dev evaluation, set ``eval_freq`` to ``0`` in your model config.' % p
+        assert _y_paths is not None, 'No data path provided for partition %s. If you did not intend to require ' + \
+                                     'dev evaluation, set ``eval_freq`` to ``0`` in your model config.' % p
+
+        for _X_path in _X_paths:
+            if _X_path not in X_paths:
+                X_paths.append(_X_path)
+        for _y_path in _y_paths:
+            if _y_path not in y_paths:
+                y_paths.append(_y_path)
 
     return X_paths, y_paths
 
@@ -421,5 +491,32 @@ def flatten_dict(d, keys=None):
             out += flatten_dict(v, keys + [k])
         else:
             out.append((tuple(keys + [k]), v))
+    return out
+
+
+def pretty_print_time(s):
+    days, s = divmod(s, 24*60*60)
+    hours, s = divmod(s, 60*60)
+    minutes, s = divmod(s, 60)
+    seconds = s
+    vals = []
+    for i, val in enumerate((days, hours, minutes, seconds)):
+        if i == 0:
+            suffix = 'd'
+        elif i == 1:
+            suffix = 'h'
+        elif i == 2:
+            suffix = 'm'
+        else:
+            suffix = 's'
+        if len(vals):
+            vals.append(('%02d%s' % (val, suffix)))
+        elif val > 0:
+            vals.append('%d%s' % (val, suffix))
+
+    if len(vals):
+        out = '-'.join(vals)
+    else:
+        out = '0'
     return out
 

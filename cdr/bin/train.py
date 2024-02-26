@@ -36,11 +36,11 @@ if __name__ == '__main__':
     if not p.use_gpu_if_available or args.cpu_only:
         os.environ['CUDA_VISIBLE_DEVICES'] = '-1'
 
-    models = filter_models(p.model_list, args.models)
+    model_names = filter_models(p.model_names, args.models)
 
     run_R = False
     run_cdr = False
-    for m in models:
+    for m in model_names:
         if m.startswith('LM') or m.startswith('GAM'):
             run_R = True
         else:
@@ -50,8 +50,8 @@ if __name__ == '__main__':
         stderr('No models to run. Exiting...\n')
         exit()
 
-    cdr_formula_list = [Formula(p.models[m]['formula']) for m in filter_models(models, cdr_only=True)]
-    cdr_formula_name_list = [m for m in filter_models(p.model_list)]
+    cdr_formula_list = [Formula(p.models[m]['formula']) for m in filter_models(model_names, cdr_only=True)]
+    cdr_formula_name_list = [m for m in filter_models(p.model_names)]
     all_rangf = [v for x in cdr_formula_list for v in x.rangf]
     partitions = get_partition_list('train')
     all_interactions = False
@@ -94,7 +94,7 @@ if __name__ == '__main__':
 
         X_baseline = X_cur
 
-        for m in models:
+        for m in model_names:
             if not m in cdr_formula_name_list:
                 p.set_model(m)
                 form = p['formula']
@@ -118,7 +118,7 @@ if __name__ == '__main__':
 
     n_train_sample = sum(len(_Y) for _Y in Y)
 
-    for m in models:
+    for m in model_names:
         p.set_model(m)
         formula = p['formula']
         m_path = m.replace(':', '+')
@@ -245,7 +245,9 @@ if __name__ == '__main__':
                 if kwarg.key not in ['outdir', 'history_length', 'future_length', 't_delta_cutoff']:
                     kwargs[kwarg.key] = p[kwarg.key]
             kwargs['crossval_factor'] = p['crossval_factor']
+            kwargs['crossval_folds'] = p['crossval_folds']
             kwargs['crossval_fold'] = p['crossval_fold']
+            kwargs['crossval_dev_fold'] = p['crossval_dev_fold']
             kwargs['irf_name_map'] = p.irf_name_map
 
             cdr_model = CDRModel(
@@ -274,7 +276,7 @@ if __name__ == '__main__':
                 continue
 
             if cdr_model.eval_freq > 0:
-                if X_paths_dev is None or Y_paths_dev is None:
+                if (X_paths_dev is None or Y_paths_dev is None) and not (p['crossval_fold'] and p['crossval_dev_fold']):
                     X_paths_dev, Y_paths_dev = paths_from_partition_cliarg('dev', p)
                     for X_path in X_paths_dev:
                         if X_path is None:

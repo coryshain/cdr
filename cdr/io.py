@@ -7,8 +7,8 @@ def read_tabular_data(X_paths, Y_paths, series_ids, categorical_columns=None, se
     """
     Read impulse and response data into pandas dataframes and perform basic pre-processing.
 
-    :param X_paths: ``str`` or ``list`` of ``str``; path(s) to impulse (predictor) data (multiple tables are concatenated). Each path may also be a ``;``-delimited list of paths to files containing predictors with different timestamps, where the predictors in each file all share the same set of timestamps.
-    :param Y_paths: ``str`` or ``list`` of ``str``; path(s) to response data (multiple tables are concatenated). Each path may also be a ``;``-delimited list of paths to files containing different response variables with different timestamps, where the response variables in each file all share the same set of timestamps.
+    :param X_paths: ``str`` or ``list`` of ``str``; path(s) to impulse (predictor) data (multiple tables are concatenated). Each path may also be a ``;``-delimited list of paths to files containing predictors with different timestamps, where the predictors in each file are all timestamped with respect to the same reference point.
+    :param Y_paths: ``str`` or ``list`` of ``str``; path(s) to response data (multiple tables are concatenated). Each path may also be a ``;``-delimited list of paths to files containing different response variables with different timestamps, where the response variables in each file are all timestamped with respect to the same reference point.
     :param series_ids: ``list`` of ``str``; column names whose jointly unique values define unique time series.
     :param categorical_columns: ``list`` of ``str``; column names that should be treated as categorical.
     :param sep: ``str``; string representation of field delimiter in input data.
@@ -27,12 +27,14 @@ def read_tabular_data(X_paths, Y_paths, series_ids, categorical_columns=None, se
     Y = []
 
     for path in X_paths:
+        assert path is not None, 'No data path provided. Exiting.'
         _X = []
         for x in path.split(';'):
             _X.append(pd.read_csv(x, sep=sep, skipinitialspace=True))
         X.append(_X)
 
     for path in Y_paths:
+        assert path is not None, 'No data path provided. Exiting.'
         _Y = []
         for y in path.split(';'):
             _Y.append(pd.read_csv(y, sep=sep, skipinitialspace=True))

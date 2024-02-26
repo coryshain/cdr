@@ -22,7 +22,7 @@ if __name__ == '__main__':
 
     p = Config(args.config_path)
 
-    models = filter_models(p.model_list, args.models, cdr_only=True)
+    models = filter_models(p.model_names, args.models, cdr_only=True)
 
     partitions = get_partition_list(args.partition)
     partition_str = '-'.join(partitions)
@@ -36,7 +36,7 @@ if __name__ == '__main__':
             if model_basename not in comparison_sets:
                 comparison_sets[model_basename] = []
             comparison_sets[model_basename].append(model_name)
-        for model_name in p.model_list:
+        for model_name in p.model_names:
             model_basename = model_name.split('!')[0]
             if model_basename in comparison_sets and model_name not in comparison_sets[model_basename]:
                 if len(args.ablation_components) > 0:
