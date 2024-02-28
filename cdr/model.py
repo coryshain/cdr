@@ -10931,6 +10931,9 @@ class CDRModel(object):
                     **kwargs
                 )
 
+                if not mc:
+                    lq = uq = None
+
                 plot_x = x_axis_transform(plot_x)
 
                 for _response in plot_y:
@@ -11057,6 +11060,9 @@ class CDRModel(object):
                     level=level,
                     **kwargs
                 )
+
+                if not mc:
+                    lq = uq = None
 
                 plot_x = x_axis_transform(plot_x)
 
