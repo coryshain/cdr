@@ -8,10 +8,6 @@ matplotlib.use('Agg')
 import matplotlib.pyplot as plt
 from matplotlib import markers
 import os
-if sys.version_info[0] == 2:
-    import ConfigParser as configparser
-else:
-    import configparser
 
 from .util import stderr, get_irf_name
 
