@@ -5122,6 +5122,8 @@ class CDRModel(object):
                 self.s_bijectors = {}
 
                 for i, response in enumerate(self.response_names):
+                    self.response_distribution_delta[response] = {}
+                    self.response_distribution_delta_w_interactions[response] = {}
                     ndim = self.get_response_ndim(response)
 
                     if self.is_real(response):
@@ -9516,6 +9518,241 @@ class CDRModel(object):
 
                 return out
 
+    def sample(
+            self,
+            X,
+            Y=None,
+            first_obs=None,
+            last_obs=None,
+            Y_time=None,
+            Y_gf=None,
+            responses=None,
+            X_in_Y_names=None,
+            X_in_Y=None,
+            n_samples=None,
+            extra_cols=False,
+            dump=False,
+            partition=None,
+            optimize_memory=False,
+            verbose=True
+    ):
+        """
+        Sample data from the fitted CDR(NN) posterior.
+
+        :param X: list of ``pandas`` tables; matrices of independent variables, grouped by series and temporally sorted.
+            Each element of **X** must contain the following columns (additional columns are ignored):
+
+            * ``time``: Timestamp associated with each observation in **X**
+
+            Across all elements of **X**, there must be a column for each independent variable in the CDR ``form_str`` provided at initialization.
+
+        :param Y (optional): ``list`` of ``pandas`` tables; matrices of independent variables, grouped by series and temporally sorted.
+            This parameter is optional and responses are not directly used. It simply allows the user to omit the
+            inputs **Y_time**, **Y_gf**, **first_obs**, and **last_obs**, since they can be inferred from **Y**
+            If supplied, each element of **Y** must contain the following columns (additional columns are ignored):
+
+            * ``time``: Timestamp associated with each observation in **y**
+            * ``first_obs``:  Index in the design matrix **X** of the first observation in the time series associated with each entry in **y**
+            * ``last_obs``:  Index in the design matrix **X** of the immediately preceding observation in the time series associated with each entry in **y**
+            * Columns with a subset of the names of the DVs specified in ``form_str`` (all DVs should be represented somewhere in **y**)
+            * A column for each random grouping factor in the model formula
+
+        :param first_obs: ``list`` of ``list`` of index vectors (``list``, ``pandas`` series, or ``numpy`` vector) of first observations; the list contains one element for each response array. Inner lists contain vectors of row indices, one for each element of **X**, of the first impulse in the time series associated with each response. If ``None``, inferred from **Y**.
+            Sort order and number of observations must be identical to that of ``y_time``.
+        :param last_obs: ``list`` of ``list`` of index vectors (``list``, ``pandas`` series, or ``numpy`` vector) of last observations; the list contains one element for each response array. Inner lists contain vectors of row indices, one for each element of **X**, of the last impulse in the time series associated with each response. If ``None``, inferred from **Y**.
+            Sort order and number of observations must be identical to that of ``y_time``.
+        :param Y_time: ``list`` of response timestamp vectors (``list``, ``pandas`` series, or ``numpy`` vector); vector(s) of response timestamps, one for each response array. Needed to timestamp any response-aligned predictors (ignored if none in model).
+        :param Y_gf: ``list`` of random grouping factor values (``list``, ``pandas`` series, or ``numpy`` vector); random grouping factor values (if applicable), one for each response dataframe.
+            Can be of type ``str`` or ``int``.
+            Sort order and number of observations must be identical to that of ``y_time``.
+        :param responses: ``list`` of ``str``, ``str``, or ``None``; Name(s) response variable(s) to convolve toward. If ``None``, convolves toward all univariate responses. Multivariate convolution (e.g. of categorical responses) is supported but turned off by default to avoid excessive computation. When convolving toward a multivariate response, a set of convolved predictors will be generated for each dimension of the response.
+        :param X_in_Y_names: ``list`` of ``str``; names of predictors contained in **Y** rather than **X** (must be present in all elements of **Y**). If ``None``, no such predictors.
+        :param X_in_Y: ``list`` of ``pandas`` ``DataFrame`` or ``None``; tables (one per response array) of predictors contained in **Y** rather than **X** (must be present in all elements of **Y**). If ``None``, inferred from **Y** and **X_in_Y_names**.
+        :param n_samples: ``int`` or ``None``; number of posterior samples to draw if Bayesian, ignored otherwise. If ``None``, use model defaults.
+        :param extra_cols: ``bool``; whether to include columns from **Y** in output tables.
+        :param dump; ``bool``; whether to save generated log likelihood vectors to disk.
+        :param partition: ``str`` or ``None``; name of data partition (or ``None`` if no partition name), used for output file naming. Ignored unless **dump** is ``True``.
+        :param optimize_memory: ``bool``; Compute expanded impulse arrays on the fly rather than pre-computing. Can reduce memory consumption by orders of magnitude but adds computational overhead at each minibatch, slowing training (typically around 1.5-2x the unoptimized training time).
+        :param verbose: ``bool``; Report progress and metrics to standard error.
+        :return: ``dict`` of ``numpy`` array of shape [len(X), n_samples], array of samples, one per response.
+        """
+
+        if verbose:
+            usingGPU = tf.test.is_gpu_available()
+            stderr('Using GPU: %s\n' % usingGPU)
+            stderr('Sampling...\n')
+
+        if partition and not partition.startswith('_'):
+            partition_str = '_' + partition
+        else:
+            partition_str = ''
+
+        if n_samples is None:
+            n_samples = self.n_samples_eval
+
+        if responses is None:
+            responses = [x for x in self.response_names if self.get_response_ndim(x) == 1]
+        if isinstance(responses, str):
+            responses = [responses]
+
+        # Preprocess data
+        if not isinstance(X, list):
+            X = [X]
+        X_in = X
+        if Y is None:
+            assert Y_time is not None, 'Either Y or Y_time must be provided.'
+            lengths = [len(_Y_time) for _Y_time in Y_time]
+        else:
+            if not isinstance(Y, list):
+                Y = [Y]
+            lengths = [len(_Y) for _Y in Y]
+        n = sum(lengths)
+        Y_in = Y
+        if Y_time is None:
+            Y_time_in = [_Y.time for _Y in Y]
+        else:
+            Y_time_in = Y_time
+        if Y_gf is None:
+            assert Y is not None, 'Either Y or Y_gf must be provided.'
+            Y_gf_in = Y
+        else:
+            Y_gf_in = Y_gf
+        if X_in_Y_names:
+            X_in_Y_names = [x for x in X_in_Y_names if x in self.impulse_names]
+        X_in_Y_in = X_in_Y
+
+        Y, first_obs, last_obs, Y_time, Y_mask, Y_gf, X_in_Y = build_CDR_response_data(
+            self.response_names,
+            Y=Y_in,
+            first_obs=first_obs,
+            last_obs=last_obs,
+            Y_gf=Y_gf_in,
+            X_in_Y_names=X_in_Y_names,
+            X_in_Y=X_in_Y_in,
+            Y_category_map=self.response_category_to_ix,
+            response_to_df_ix=self.response_to_df_ix,
+            gf_names=self.rangf,
+            gf_map=self.rangf_map
+        )
+
+        if not optimize_memory or not np.isfinite(self.minibatch_size):
+            X, X_time, X_mask = build_CDR_impulse_data(
+                X_in,
+                first_obs,
+                last_obs,
+                X_in_Y_names=X_in_Y_names,
+                X_in_Y=X_in_Y,
+                history_length=self.history_length,
+                future_length=self.future_length,
+                impulse_names=self.impulse_names,
+                int_type=self.int_type,
+                float_type=self.float_type,
+            )
+
+        with self.session.as_default():
+            with self.session.graph.as_default():
+                self.set_predict_mode(True)
+                B = self.eval_minibatch_size
+                n_eval_minibatch = math.ceil(n / B)
+                Y_samp = {}
+                for _response in responses:
+                    Y_samp[_response] = np.zeros((n, n_samples))
+                for i in range(0, n, B):
+                    if verbose:
+                        stderr('\rMinibatch %d/%d' % ((i / B) + 1, n_eval_minibatch))
+                    if optimize_memory:
+                        _Y = None if Y is None else Y[i:i + B]
+                        _first_obs = [x[i:i + B] for x in first_obs]
+                        _last_obs = [x[i:i + B] for x in last_obs]
+                        _Y_time = Y_time[i:i + B]
+                        _Y_mask = Y_mask[i:i + B]
+                        _Y_gf = None if Y_gf is None else Y_gf[i:i + B]
+                        _X_in_Y = None if X_in_Y is None else X_in_Y[i:i + B]
+
+                        _X, _X_time, _X_mask = build_CDR_impulse_data(
+                            X_in,
+                            _first_obs,
+                            _last_obs,
+                            X_in_Y_names=X_in_Y_names,
+                            X_in_Y=_X_in_Y,
+                            history_length=self.history_length,
+                            future_length=self.future_length,
+                            impulse_names=self.impulse_names,
+                            int_type=self.int_type,
+                            float_type=self.float_type,
+                        )
+                        fd = {
+                            'X': _X,
+                            'X_time': _X_time,
+                            'X_mask': _X_mask,
+                            'Y_time': _Y_time,
+                            'Y_mask': _Y_mask,
+                            'Y_gf': _Y_gf,
+                            'training': not self.predict_mode
+                        }
+                    else:
+                        fd = {
+                            'X': X[i:i + B],
+                            'X_time': X_time[i:i + B],
+                            'X_mask': X_mask[i:i + B],
+                            'Y_time': Y_time[i:i + B],
+                            'Y_mask': Y_mask[i:i + B],
+                            'Y_gf': None if Y_gf is None else Y_gf[i:i + B],
+                            'training': not self.predict_mode
+                        }
+                    if verbose:
+                        stderr('\rMinibatch %d/%d' % ((i / B) + 1, n_eval_minibatch))
+                    _Y_samp = self.run_sample_op(
+                        fd,
+                        responses=responses,
+                        n_samples=n_samples,
+                        verbose=verbose
+                    )
+                    for _response in _Y_samp:
+                        Y_samp[_response][i:i + B] = _Y_samp[_response]
+
+                # Split into per-file predictions.
+                # Exclude the length of last file because it will be inferred.
+                Y_samp = split_cdr_outputs(Y_samp, [x for x in lengths[:-1]])
+
+                if verbose:
+                    stderr('\n\n')
+
+                self.set_predict_mode(False)
+
+                out = {}
+                n_digits = int(np.floor(np.log10(n_samples))) + 1
+                col_template = 'CDRsamp%%0%sd' % n_digits
+                names = [col_template % x for x in range(1, n_samples + 1)]
+                for _response in responses:
+                    out[_response] = []
+                    file_ix = self.response_to_df_ix[_response]
+                    multiple_files = len(file_ix) > 1
+                    for ix in file_ix:
+                        df = pd.DataFrame(Y_samp[_response][ix], columns=names, dtype=self.FLOAT_NP)
+                        if extra_cols:
+                            if Y is None:
+                                df_extra = {x: Y_gf_in[i] for i, x in enumerate(self.rangf)}
+                                df_extra['time'] = Y_time_in[ix]
+                                df_extra = pd.DataFrame(df_extra)
+                            else:
+                                new_cols = []
+                                for c in Y_in[ix].columns:
+                                    if c not in df:
+                                        new_cols.append(c)
+                                df_extra = Y_in[ix][new_cols].reset_index(drop=True)
+                            df = pd.concat([df, df_extra], axis=1)
+                        out[_response].append(df)
+
+                        if dump:
+                            if multiple_files:
+                                name_base = '%s_f%s%s' % (sn(_response), ix, partition_str)
+                            else:
+                                name_base = '%s_%s' % (sn(_response), partition_str)
+                            df.to_csv(self.outdir + '/Ysamp_%s.csv' % name_base, sep=' ', na_rep='NaN', index=False)
+
+                return out
+
     def error_theoretical_quantiles(
             self,
             n_errors,
@@ -9659,7 +9896,7 @@ class CDRModel(object):
         if response_params is None:
             response_params = set()
             for response in responses:
-                if self.has_analytical_mean[response]:
+                if self.is_real(response) and self.has_analytical_mean[response]:
                     response_params.add('mean')
                 else:
                     response_params.add(self.get_response_params(response)[0])
@@ -10284,11 +10521,17 @@ class CDRModel(object):
 
         if responses is None:
             responses = self.response_names
+
         if response_params is None:
-            response_params = {'mean'}
-            for _response in responses:
-                response_params.add(self.get_response_params(_response)[0])
+            response_params = set()
+            for response in responses:
+                if self.is_real(response) and self.has_analytical_mean[response]:
+                    response_params.add('mean')
+                else:
+                    response_params.add(self.get_response_params(response)[0])
             response_params = sorted(list(response_params))
+        if isinstance(response_params, str):
+            response_params = [response_params]
 
         for g, gf_y_ref in enumerate(gf_y_refs):
             _, _, _, _, vals = self.get_plot_data(
@@ -10440,6 +10683,7 @@ class CDRModel(object):
             prefix=None,
             suffix='.png',
             use_legend=None,
+            use_fill=None,
             use_line_markers=False,
             transparent_background=False,
             keep_plot_history=None,
@@ -10464,45 +10708,46 @@ class CDRModel(object):
         :param response_params: ``list`` of ``str``, ``str``, or ``None``; Name(s) of parameter of response distribution(s) to plot per response variable. Any param names not used by the response distribution for a given response will be ignored. If ``None``, plots the first parameter of each response distribution.
         :param summed: ``bool``; whether to plot individual IRFs or their sum.
         :param pred_names: ``list`` or ``None``; list of names of predictors to include in plots. If ``None``, all predictors are plotted.
-        :param sort_names: ``bool``; whether to alphabetically sort IRF names.
+        :param sort_names: ``bool``; alphabetically sort IRF names.
         :param plot_unscaled: ``bool``; plot unscaled IRFs.
         :param plot_composite: ``bool``; plot any composite IRFs. If ``False``, only plots terminal IRFs.
         :param prop_cycle_length: ``int`` or ``None``; Length of plotting properties cycle (defines step size in the color map). If ``None``, inferred from **pred_names**.
         :param prop_cycle_map: ``dict``, ``list`` of ``int``, or ``None``; Integer indices to use in the properties cycle for each entry in **pred_names**. If a ``dict``, a map from predictor names to ``int``. If a ``list`` of ``int``, predictors inferred using **pred_names** are aligned to ``int`` indices one-to-one. If ``None``, indices are automatically assigned.
-        :param plot_dirac: ``bool`` or ``None``; whether to include any Dirac delta IRF's (stick functions at t=0) in plot. If ``None``, use default setting.
+        :param plot_dirac: ``bool`` or ``None``; include any Dirac delta IRF's (stick functions at t=0) in plot. If ``None``, use default setting.
         :param reference_time: ``float`` or ``None``; timepoint at which to plot interactions. If ``None``, use default setting.
-        :param plot_rangf: ``bool``; whether to plot all (marginal) random effects.
+        :param plot_rangf: ``bool``; plot all (marginal) random effects.
         :param plot_n_time_units: ``float`` or ``None``; resolution of plot axis (for 3D plots, uses sqrt of this number for each axis). If ``None``, use default setting.
         :param plot_support_start: ``float`` or ``None``; start time for IRF plots. If ``None``, use default setting.
         :param reference_type: ``bool``; whether to use the predictor means as baseline reference (otherwise use zero).
         :param plot_quantile_range: ``float``; quantile range to use for plotting. E.g., 0.9 uses the interdecile range.
         :param plot_step: ``str`` or ``None``; size of step by predictor to take above reference in univariate IRF plots. Structured as space-delimited pairs ``NAME=FLOAT``. Any predictor without a specified step size will inherit from **plot_step_default**.
         :param plot_step_default: ``float``, ``str``, or ``None``; default size of step to take above reference in univariate IRF plots, if not specified in **plot_step**. Either a float or the string ``'sd'``, which indicates training sample standard deviation.
-        :param generate_univariate_irf_plots: ``bool``; whether to plot univariate IRFs over time.
-        :param generate_univariate_irf_heatmaps: ``bool``; whether to plot univariate IRFs over time.
-        :param generate_curvature_plots: ``bool`` or ``None``; whether to plot IRF curvature at time **reference_time**. If ``None``, use default setting.
-        :param generate_irf_surface_plots: ``bool`` or ``None``; whether to plot IRF surfaces.  If ``None``, use default setting.
-        :param generate_nonstationarity_surface_plots: ``bool`` or ``None``; whether to plot IRF surfaces showing non-stationarity in the response.  If ``None``, use default setting.
-        :param generate_interaction_surface_plots: ``bool`` or ``None``; whether to plot IRF interaction surfaces at time **reference_time**.  If ``None``, use default setting.
-        :param generate_err_dist_plots: ``bool`` or ``None``; whether to plot the average error distribution for real-valued responses.  If ``None``, use default setting.
+        :param generate_univariate_irf_plots: ``bool``; plot univariate IRFs over time.
+        :param generate_univariate_irf_heatmaps: ``bool``; plot univariate IRFs over time.
+        :param generate_curvature_plots: ``bool`` or ``None``; plot IRF curvature at time **reference_time**. If ``None``, use default setting.
+        :param generate_irf_surface_plots: ``bool`` or ``None``; plot IRF surfaces.  If ``None``, use default setting.
+        :param generate_nonstationarity_surface_plots: ``bool`` or ``None``; plot IRF surfaces showing non-stationarity in the response.  If ``None``, use default setting.
+        :param generate_interaction_surface_plots: ``bool`` or ``None``; plot IRF interaction surfaces at time **reference_time**.  If ``None``, use default setting.
+        :param generate_err_dist_plots: ``bool`` or ``None``; plot the average error distribution for real-valued responses.  If ``None``, use default setting.
         :param x_axis_transform: ``str`` or ``None``; string description of transform to apply to x-axis prior to plotting. Currently supported: ``'exp'``, ``'log'``, ``'neglog'``. If ``None``, no x-axis transform.
         :param y_axis_transform: ``str`` or ``None``; string description of transform to apply to y-axis (in 3d plots only) prior to plotting. Currently supported: ``'exp'``, ``'log'``, ``'neglog'``. If ``None``, no y-axis transform.
         :param plot_x_inches: ``float`` or ``None``; width of plot in inches. If ``None``, use default setting.
         :param plot_y_inches: ``float`` or ``None; height of plot in inches. If ``None``, use default setting.
         :param ylim: 2-element ``tuple`` or ``list``; (lower_bound, upper_bound) to use for y axis. If ``None``, automatically inferred.
-        :param use_horiz_axlab: ``bool``; whether to include horizontal axis label(s) (x axis in 2D plots, x/y axes in 3D plots).
-        :param use_vert_axlab: ``bool``; whether to include vertical axis label (y axis in 2D plots, z axis in 3D plots).
+        :param use_horiz_axlab: ``bool``; include horizontal axis label(s) (x axis in 2D plots, x/y axes in 3D plots).
+        :param use_vert_axlab: ``bool``; include vertical axis label (y axis in 2D plots, z axis in 3D plots).
         :param cmap: ``str``; name of MatPlotLib cmap specification to use for plotting (determines the color of lines in the plot).
         :param dpi: ``int`` or ``None``; dots per inch of saved plot image file. If ``None``, use default setting.
         :param level: ``float``; significance level for confidence/credible intervals, if supported.
         :param n_samples: ``int`` or ``None``; number of posterior samples to draw if Bayesian, ignored otherwise. If ``None``, use model defaults.
         :param prefix: ``str`` or ``None``; prefix appended to output filenames. If ``None``, no prefix added.
         :param suffix: ``str``; file extension of plot outputs.
-        :param use_legend: ``bool`` or ``None``; whether to include a legend in plots with multiple components. If ``None``, use default setting.
-        :param use_line_markers: ``bool``; whether to add markers to lines in univariate IRF plots.
-        :param transparent_background: ``bool``; whether to use a transparent background. If ``False``, uses a white background.
+        :param use_legend: ``bool`` or ``None``; include a legend in plots with multiple components. If ``None``, use default setting.
+        :param use_fill: ``bool``; fill between the uncertainty bounds. If ``False``, use dotted outlines.
+        :param use_line_markers: ``bool``; add markers to lines in univariate IRF plots.
+        :param transparent_background: ``bool``; use a transparent background. If ``False``, uses a white background.
         :param keep_plot_history: ``bool`` or ``None``; keep the history of all plots by adding a suffix with the iteration number. Can help visualize learning but can also consume a lot of disk space. If ``False``, always overwrite with most recent plot. If ``None``, use default setting.
-        :param dump_source: ``bool``; Whether to dump the plot source array to a csv file.
+        :param dump_source: ``bool``; dump the plot source array to a csv file.
         :param **kwargs: ``dict``; extra kwargs to pass to ``get_plot_data``
         :return: ``None``
         """
@@ -10521,7 +10766,7 @@ class CDRModel(object):
         if response_params is None:
             response_params = set()
             for response in responses:
-                if self.has_analytical_mean[response]:
+                if self.is_real(response) and self.has_analytical_mean[response]:
                     response_params.add('mean')
                 else:
                     response_params.add(self.get_response_params(response)[0])
@@ -10588,6 +10833,8 @@ class CDRModel(object):
             plot_x_inches = self.plot_x_inches
         if plot_y_inches is None:
             plot_y_inches = self.plot_y_inches
+        if use_fill is None:
+            use_fill = self.plot_fill
         if use_legend is None:
             use_legend = self.plot_legend
         if cmap is None:
@@ -10747,6 +10994,7 @@ class CDRModel(object):
                                 cmap=cmap,
                                 dpi=dpi,
                                 legend=use_legend,
+                                use_fill=use_fill,
                                 xlab=xlab,
                                 ylab=ylab,
                                 use_line_markers=use_line_markers,
@@ -10863,6 +11111,7 @@ class CDRModel(object):
                                 cmap=cmap,
                                 dpi=dpi,
                                 legend=False,
+                                use_fill=use_fill,
                                 xlab=xlab,
                                 ylab=ylab,
                                 use_line_markers=use_line_markers,
@@ -11312,7 +11561,7 @@ class CDREnsemble(CDRModel):
             self.models.append(load_cdr(mpath))
 
         assert self.models, 'An ensemble must contain at least one model. Exiting...'
-        # self.__setstate__(self.models[0].__getstate__())
+
         self.model_index = self.sample_model_index()
         self.outdir = os.path.join(self.outdir_top, self.name)
 

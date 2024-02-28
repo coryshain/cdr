@@ -56,7 +56,7 @@ if __name__ == '__main__':
             prefix = '_'.join([x for x in p.outdir.split('/') if x not in ['.', '..']])
         key = plot_config.get('key', None)
 
-        n_time_units = plot_config.get('plot_n_time_units', p.get('plot_n_time_units', 2.5))
+        n_time_units = plot_config.get('plot_n_time_units', p.get('plot_n_time_units', 1))
         reference_time = plot_config.get('reference_time', p.get('reference_time', 0.))
         resolution = plot_config.get('plot_n_time_points', p.get('plot_n_time_points', 1024))
         plot_x_inches = plot_config.get('plot_x_inches', p.get('plot_x_inches', 6.))

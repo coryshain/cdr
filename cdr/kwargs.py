@@ -704,7 +704,7 @@ MODEL_INITIALIZATION_KWARGS = [
     ),
     Kwarg(
         'plot_x_inches',
-        6.,
+        4.,
         float,
         "Width of plot in inches."
     ),
@@ -713,6 +713,13 @@ MODEL_INITIALIZATION_KWARGS = [
         4.,
         float,
         "Height of plot in inches."
+    ),
+    Kwarg(
+        'plot_fill',
+        False,
+        bool,
+        "Whether to fill between the uncertainty bounds in plots. If ``False``, use dotted outlines.",
+        aliases=['use_fill', 'fill']
     ),
     Kwarg(
         'plot_legend',
@@ -1612,6 +1619,13 @@ PLOT_KWARGS_CORE = [
         True,
         bool,
         "Whether to include vertical axis label (y axis in 2D plots, z axis in 3D plots)."
+    ),
+    Kwarg(
+        'use_fill',
+        None,
+        [bool, None],
+        "Whether to fill between the uncertainty bounds in plots. If ``False``, use dotted outlines.",
+        aliases=['fill']
     ),
     Kwarg(
         'use_legend',

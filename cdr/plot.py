@@ -30,10 +30,14 @@ def plot_irf(
         ylim=None,
         cmap='gist_rainbow',
         legend=True,
+        legend_above=False,
         xlab=None,
         ylab=None,
         use_line_markers=False,
-        use_grid=True,
+        use_grid=False,
+        use_fill=True,
+        use_left_spine=True,
+        use_bottom_spine=True,
         transparent_background=False,
         dpi=300,
         dump_source=False
@@ -57,10 +61,14 @@ def plot_irf(
     :param ylim: 2-element ``tuple`` or ``list``; (lower_bound, upper_bound) to use for y axis. If ``None``, automatically inferred.
     :param cmap: ``str``; name of ``matplotlib`` ``cmap`` object (determines colors of plotted IRF).
     :param legend: ``bool``; include a legend.
+    :param legend_above: ``bool``; place legend above axis.
     :param xlab: ``str`` or ``None``; x-axis label. If ``None``, no label.
     :param ylab: ``str`` or ``None``; y-axis label. If ``None``, no label.
     :param use_line_markers: ``bool``; add markers to IRF lines.
-    :param use_grid: ``bool``; whether to show a background grid.
+    :param use_grid: ``bool``; show a background grid.
+    :param use_fill: ``bool``; fill between the uncertainty bounds. If ``False``, use dotted outlines.
+    :param use_left_spine: ``bool``; show the left spine.
+    :param use_bottom_spine: ``bool``; show the bottom spine.
     :param transparent_background: ``bool``; use a transparent background. If ``False``, uses a white background.
     :param dpi: ``int``; dots per inch.
     :param dump_source: ``bool``; Whether to dump the plot source array to a csv file.
@@ -100,15 +108,15 @@ def plot_irf(
 
     ax.spines['top'].set_visible(False)
     ax.spines['right'].set_visible(False)
-    ax.spines['bottom'].set_visible(False)
-    ax.spines['left'].set_visible(False)
+    ax.spines['bottom'].set_visible(use_bottom_spine)
+    ax.spines['left'].set_visible(use_left_spine)
     ax.tick_params(top='off', bottom='off', left='off', right='off', labelleft='on', labelbottom='on')
-    ax.xaxis.set_ticks_position('none')
-    ax.yaxis.set_ticks_position('none')
+    ax.xaxis.set_ticks_position('bottom')
+    ax.yaxis.set_ticks_position('left')
     if use_grid:
         ax.grid(visible=True, which='major', axis='both', ls='--', lw=.5, c='k', alpha=.3)
-    ax.axhline(y=0, lw=1, c='gray', alpha=1)
-    ax.axvline(x=0, lw=1, c='gray', alpha=1)
+    ax.axhline(y=0, lw=1, c='k', alpha=1)
+    ax.axvline(x=0, lw=1, c='k', alpha=1)
     if density is not None:
         ax_d = ax.twinx()
         ax_d.spines['top'].set_visible(False)
@@ -123,9 +131,16 @@ def plot_irf(
 
     for i in range(len(sort_ix)):
         markevery = int(len(plot_y) / 10)
-        ax.plot(plot_x, plot_y[:,sort_ix[i]], label=irf_names_processed[sort_ix[i]], lw=2, alpha=0.8, linestyle='-', markevery=markevery, markersize=12, solid_capstyle='butt')
+        ax.plot(plot_x, plot_y[:,sort_ix[i]], label=irf_names_processed[sort_ix[i]], lw=2, alpha=0.8, linestyle='-',
+                markevery=markevery, markersize=12, solid_capstyle='butt')
         if uq is not None and lq is not None:
-            ax.fill_between(plot_x, lq[:,sort_ix[i]], uq[:,sort_ix[i]], alpha=0.25)
+            if use_fill:
+                ax.fill_between(plot_x, lq[:,sort_ix[i]], uq[:,sort_ix[i]], alpha=0.25)
+            else:
+                ax.plot(plot_x, lq[:, sort_ix[i]], lw=2, alpha=0.4, linestyle='dotted', solid_capstyle='butt',
+                        marker='', color=color_cycle[i])
+                ax.plot(plot_x, uq[:, sort_ix[i]], lw=2, alpha=0.4, linestyle='dotted', solid_capstyle='butt',
+                        marker='', color=color_cycle[i])
 
     if xlab:
         if irf_name_map is not None:
@@ -137,7 +152,18 @@ def plot_irf(
         ax.set_ylabel(ylab)
 
     if legend:
-        ax.legend(fancybox=True, framealpha=0.75, frameon=True, facecolor='white', edgecolor='gray')
+        legend_kwargs = {
+            'fancybox': True,
+            'framealpha': 0.75,
+            'frameon': True,
+            'facecolor': 'white',
+            'edgecolor': 'gray'
+        }
+        if legend_above:
+            legend_kwargs['loc'] = 'lower center'
+            legend_kwargs['bbox_to_anchor'] = (0.5, 1)
+            legend_kwargs['frameon'] = False
+        ax.legend(**legend_kwargs)
 
     xlim = (plot_x.min(), plot_x.max())
     ax.set_xlim(xlim)
@@ -158,8 +184,9 @@ def plot_irf(
 
     if dump_source:
         csvname = '.'.join(filename.split('.')[:-1]) + '.csv'
+        names_cur = []
         if irf_name_map is not None:
-            names_cur = [get_irf_name(x, irf_name_map) for x in irf_names]
+            names_cur += [get_irf_name(x, irf_name_map) for x in irf_names]
         df = pd.DataFrame(np.concatenate([plot_x[..., None], plot_y], axis=1), columns=['time'] + names_cur)
         
         if lq is not None:
@@ -339,7 +366,7 @@ def plot_surface(
 
     plt.rcParams["font.family"] = "sans-serif"
 
-    fig = plt.figure()
+    fig = plt.figure(constrained_layout=True)
     fig.set_size_inches(plot_x_inches, plot_y_inches)
     ax = fig.gca(projection='3d')
     ax.view_init(50, 215)
@@ -570,7 +597,8 @@ def plot_surface(
         fig.savefig(
             outdir + '/' + filename,
             dpi=dpi,
-            transparent=transparent_background
+            transparent=transparent_background,
+            bbox_inches='tight'
         )
     except Exception as e:
         stderr('Error saving plot to file %s. Description:\n%s\nSkipping...\n' % (outdir + '/' + filename, e))
