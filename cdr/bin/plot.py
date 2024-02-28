@@ -76,7 +76,7 @@ if __name__ == '__main__':
         plot_kwargs = {x: plot_config.settings_core[x] for x in plot_config.settings_core if x not in ('prefix', 'key')}
         plot_kwargs.update(extra_kwargs)
 
-        synth_path = os.path.dirname(os.path.dirname(p.X_train)) + '/d.obj'
+        synth_path = os.path.dirname(os.path.dirname(p.X_train[0])) + '/d.obj'
         if plot_true_synthetic and os.path.exists(synth_path):
             with open(synth_path, 'rb') as f:
                 d = pickle.load(f)

@@ -5102,6 +5102,7 @@ class CDRModel(object):
                 self.interaction_delta = {}  # Key order: <response>; Value: nbatch x nparam x ndim tensor of interaction-driven offsets at response distribution parameter of the response (summing over predictors and time)
                 self.output = {}  # Key order: <response>; Value: nbatch x nparam x ndim tensor of predictoins at response distribution parameter of the response (summing over predictors and time)
                 self.response_distribution = {}
+                self.response_distribution_sample = {}
                 self.has_analytical_mean = {}
                 self.response_distribution_delta = {} # IRF-driven changes in each parameter of the response distribution
                 self.response_distribution_delta_w_interactions = {} # IRF-driven changes in each parameter of the response distribution
@@ -5121,13 +5122,6 @@ class CDRModel(object):
                 self.s_bijectors = {}
 
                 for i, response in enumerate(self.response_names):
-                    self.response_distribution[response] = {}
-                    self.response_distribution_delta[response] = {}
-                    self.response_distribution_delta_w_interactions[response] = {}
-                    self.ll_by_var[response] = {}
-                    self.error_distribution[response] = {}
-                    self.error_distribution_theoretical_quantiles[response] = {}
-                    self.error_distribution_theoretical_cdf[response] = {}
                     ndim = self.get_response_ndim(response)
 
                     if self.is_real(response):
@@ -5254,6 +5248,7 @@ class CDRModel(object):
                     )
                     pred_mean = response_dist.mean()
                     self.response_distribution[response] = response_dist
+                    self.response_distribution_sample[response] = response_dist.sample()[:, 0, 0]
                     self.has_analytical_mean[response] = response_dist.has_analytical_mean()
                     if not self.is_categorical(response):
                         base_response_dist, _, _ = self._initialize_response_distribution_inner(
@@ -8335,6 +8330,47 @@ class CDRModel(object):
 
         return out
 
+    def run_sample_op(self, feed_dict, responses=None, n_samples=None, verbose=True):
+        """
+        Sample data from model's posterior.
+
+        :param feed_dict: ``dict``; A dictionary mapping string input names (e.g. ``'X'``, ``'X_time'``) to their values.
+        :param responses: ``list`` of ``str``, ``str``, or ``None``; Name(s) response variable(s) to sample. If ``None``, samples all univariate responses.
+        :param n_samples: ``int`` or ``None``; number of posterior samples to draw. If ``None``, use model defaults.
+        :param verbose: ``bool``; Send progress reports to standard error.
+        :return: ``dict`` of ``numpy`` arrays; The sampled data, one per per **response**. Each element has shape (batch, n_responses)
+        """
+
+        feed_dict['use_MAP_mode'] = False
+
+        if responses is None:
+            responses = [x for x in self.response_names if self.get_response_ndim(x) == 1]
+        if isinstance(responses, str):
+            responses = [responses]
+
+        if n_samples is None:
+            n_samples = self.n_samples_eval
+        if verbose:
+            stderr('\n')
+            pb = keras.utils.Progbar(n_samples)
+
+        Y = {}
+        for _response in responses:
+            Y[_response] = np.zeros((len(feed_dict['Y_time']), n_samples))
+
+        for i in range(0, n_samples):
+            self.resample_model()
+            to_run = {}
+            for _response in responses:
+                to_run[_response] = self.response_distribution_sample[_response]
+            fd = {getattr(self, x): feed_dict[x] for x in feed_dict}
+            _Y = self.session.run(to_run, feed_dict=fd)
+            for _response in _Y:
+                Y[_response][..., i] = _Y[_response]
+            if verbose:
+                pb.update(i + 1)
+
+        return Y
 
     def predict(
             self,
