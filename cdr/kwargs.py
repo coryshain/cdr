@@ -596,6 +596,13 @@ MODEL_INITIALIZATION_KWARGS = [
         default_value_cdrnn=100.
     ),
     Kwarg(
+        'ranef_dropout_rate',
+        None,
+        [float, None],
+        "Rate at which to drop random effects indicators.",
+        aliases=['dropout', 'dropout_rate']
+    ),
+    Kwarg(
         'regularize_mean',
         False,
         bool,
@@ -1315,13 +1322,6 @@ NN_KWARGS = [
         0.5,
         [float, None],
         "Rate at which to drop neurons of IRF layers.",
-        aliases=['dropout', 'dropout_rate']
-    ),
-    Kwarg(
-        'ranef_dropout_rate',
-        None,
-        [float, None],
-        "Rate at which to drop random effects indicators.",
         aliases=['dropout', 'dropout_rate']
     ),
     Kwarg(

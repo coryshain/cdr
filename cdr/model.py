@@ -1780,22 +1780,20 @@ class CDRModel(object):
                     shape=[None, len(self.rangf)],
                     name='Y_gf'
                 )
-                self.Y_gf_dropout = {}
-                self.ranef_dropout_layer = {}
-                for nn_id in self.nns_by_id:
-                    ranef_dropout_rate = self.get_nn_meta('ranef_dropout_rate', nn_id)
-                    if ranef_dropout_rate and not ranef_dropout_rate in self.Y_gf_dropout:
-                        ranef_dropout_layer = get_dropout(
-                            ranef_dropout_rate,
-                            training=self.training,
-                            use_MAP_mode=tf.constant(True, dtype=tf.bool),
-                            rescale=False,
-                            constant=self.gf_defaults,
-                            name='ranef_dropout',
-                            session=self.session
-                        )
-                        self.ranef_dropout_layer[ranef_dropout_rate] = ranef_dropout_layer
-                        self.Y_gf_dropout[ranef_dropout_rate] = ranef_dropout_layer(self.Y_gf)
+                self.Y_gf_processed = self.Y_gf
+                if self.ranef_dropout_rate:
+                    self.ranef_dropout_layer = get_dropout(
+                        self.ranef_dropout_rate,
+                        training=self.training,
+                        use_MAP_mode=tf.constant(True, dtype=tf.bool),
+                        rescale=False,
+                        constant=self.gf_defaults,
+                        name='ranef_dropout',
+                        session=self.session
+                    )
+                    self.Y_gf_processed = self.ranef_dropout_layer(self.Y_gf_processed)
+                else:
+                    self.ranef_dropout_layer = None
 
                 self.dirac_delta_mask = tf.cast(
                     tf.abs(self.t_delta) < self.epsilon,
@@ -2696,7 +2694,7 @@ class CDRModel(object):
                                 axis=0
                             )
 
-                            intercept = intercept + tf.gather(intercept_random, self.Y_gf[:, i])
+                            intercept = intercept + tf.gather(intercept_random, self.Y_gf_processed[:, i])
 
                     self.intercept[response] = intercept
 
@@ -2899,7 +2897,7 @@ class CDRModel(object):
                                 axis=1
                             )
 
-                            coefficient = coefficient + tf.gather(coefficient_random, self.Y_gf[:, i], axis=0)
+                            coefficient = coefficient + tf.gather(coefficient_random, self.Y_gf_processed[:, i], axis=0)
 
                     self.coefficient[response] = coefficient
 
@@ -3205,7 +3203,7 @@ class CDRModel(object):
                                             axis=1
                                         )
 
-                                        irf_param = irf_param + tf.gather(irf_param_random, self.Y_gf[:, i], axis=0)
+                                        irf_param = irf_param + tf.gather(irf_param_random, self.Y_gf_processed[:, i], axis=0)
 
                             if irf_param_lb is not None and irf_param_ub is None:
                                 irf_param = irf_param_lb + self.constraint_fn(irf_param) + self.epsilon
@@ -3860,7 +3858,6 @@ class CDRModel(object):
                 irf_inner_activation = self.get_nn_meta('irf_inner_activation', nn_id)
                 irf_activation = self.get_nn_meta('irf_activation', nn_id)
                 irf_dropout_rate = self.get_nn_meta('irf_dropout_rate', nn_id)
-                ranef_dropout_rate = self.get_nn_meta('ranef_dropout_rate', nn_id)
                 input_dropout_rate = self.get_nn_meta('input_dropout_rate', nn_id)
                 maxnorm = self.get_nn_meta('maxnorm', nn_id)
                 ranef_l1_only = self.get_nn_meta('ranef_l1_only', nn_id)
@@ -3875,10 +3872,7 @@ class CDRModel(object):
                 nn_use_input_scaler = self.get_nn_meta('nn_use_input_scaler', nn_id)
 
                 rangf_map = {}
-                if ranef_dropout_rate:
-                    Y_gf = self.Y_gf_dropout[ranef_dropout_rate]
-                else:
-                    Y_gf = self.Y_gf
+                Y_gf = self.Y_gf_processed
                 for i, gf in enumerate(self.rangf):
                     if gf in self.nns_by_id[nn_id].rangf:
                         _Y_gf = Y_gf[:, i]
@@ -4810,7 +4804,7 @@ class CDRModel(object):
                                     axis=1
                                 )
 
-                                interaction = interaction + tf.gather(interaction_random, self.Y_gf[:, i], axis=0)
+                                interaction = interaction + tf.gather(interaction_random, self.Y_gf_processed[:, i], axis=0)
 
                         self.interaction[response] = interaction
 
