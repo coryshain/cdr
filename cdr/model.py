@@ -3654,14 +3654,14 @@ class CDRModel(object):
         with self.session.as_default():
             with self.session.graph.as_default():
                 if final:
-                    weight_sd_prior = 1.
-                    bias_sd_prior = 1.
-                    gamma_sd_prior = 1.
+                    weight_prior_sd = 1.
+                    bias_prior_sd = 1.
+                    gamma_prior_sd = 1.
                     declare_priors_weights = self.declare_priors_fixef
                 else:
-                    weight_sd_prior = self.get_nn_meta('weight_prior_sd', nn_id)
-                    bias_sd_prior = self.get_nn_meta('bias_prior_sd', nn_id)
-                    gamma_sd_prior = self.get_nn_meta('gamma_prior_sd', nn_id)
+                    weight_prior_sd = self.get_nn_meta('weight_prior_sd', nn_id)
+                    bias_prior_sd = self.get_nn_meta('bias_prior_sd', nn_id)
+                    gamma_prior_sd = self.get_nn_meta('gamma_prior_sd', nn_id)
                     declare_priors_weights = self.get_nn_meta('declare_priors_weights', nn_id)
                     declare_priors_gamma = self.get_nn_meta('declare_priors_gamma', nn_id)
 
@@ -3685,11 +3685,11 @@ class CDRModel(object):
                     declare_priors_weights=declare_priors_weights,
                     declare_priors_biases=declare_priors_biases,
                     declare_priors_gamma=declare_priors_gamma,
-                    kernel_sd_prior=weight_sd_prior,
+                    kernel_sd_prior=weight_prior_sd,
                     kernel_sd_init=weight_sd_init,
-                    bias_sd_prior=bias_sd_prior,
+                    bias_sd_prior=bias_prior_sd,
                     bias_sd_init=bias_sd_init,
-                    gamma_sd_prior=gamma_sd_prior,
+                    gamma_sd_prior=gamma_prior_sd,
                     gamma_sd_init=gamma_sd_init,
                     posterior_to_prior_sd_ratio=self.posterior_to_prior_sd_ratio,
                     ranef_to_fixef_prior_sd_ratio=self.ranef_to_fixef_prior_sd_ratio,

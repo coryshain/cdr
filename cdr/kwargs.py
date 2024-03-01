@@ -1388,7 +1388,7 @@ NN_BAYES_KWARGS = [
     ),
     Kwarg(
         'weight_prior_sd',
-        'glorot',
+        1,
         [str, float],
         "Standard deviation of prior on CDRNN hidden weights. A ``float``, ``'glorot'``, or ``'he'``.",
         aliases=['conv_prior_sd', 'prior_sd']
