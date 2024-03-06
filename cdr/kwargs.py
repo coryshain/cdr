@@ -600,7 +600,7 @@ MODEL_INITIALIZATION_KWARGS = [
         None,
         [float, None],
         "Rate at which to drop random effects indicators.",
-        aliases=['dropout', 'dropout_rate']
+        aliases=['ranef_dropout']
     ),
     Kwarg(
         'regularize_mean',
