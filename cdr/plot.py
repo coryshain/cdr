@@ -111,7 +111,7 @@ def plot_irf(
     ax.xaxis.set_ticks_position('none')
     ax.yaxis.set_ticks_position('none')
     if use_grid:
-        ax.grid(b=True, which='major', axis='both', ls='--', lw=.5, c='k', alpha=.3)
+        ax.grid(visible=True, which='major', axis='both', ls='--', lw=.5, c='k', alpha=.3)
     ax.axhline(y=0, lw=1, c='gray', alpha=1)
     ax.axvline(x=0, lw=1, c='gray', alpha=1)
     if density is not None:
@@ -627,7 +627,7 @@ def plot_qq(
     plt.gca().spines['bottom'].set_visible(False)
     plt.gca().spines['left'].set_visible(False)
     plt.gca().tick_params(top='off', bottom='off', left='off', right='off', labelleft='on' if ticks else 'off', labelbottom='on' if ticks else 'off')
-    plt.grid(b=True, which='major', axis='both', ls='--', lw=.5, c='k', alpha=.3)
+    plt.grid(visible=True, which='major', axis='both', ls='--', lw=.5, c='k', alpha=.3)
     plt.axhline(y=0, lw=1, c='gray', alpha=1)
     plt.axvline(x=0, lw=1, c='gray', alpha=1)
 
