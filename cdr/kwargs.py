@@ -442,7 +442,7 @@ MODEL_INITIALIZATION_KWARGS = [
         0.001,
         float,
         "Initial value for the learning rate.",
-        default_value_cdrnn=0.01
+        default_value_cdrnn=0.01,
     ),
     Kwarg(
         'learning_rate_min',
@@ -510,8 +510,7 @@ MODEL_INITIALIZATION_KWARGS = [
         'convergence_n_iterates',
         500,
         [int, None],
-        "Number of timesteps over which to average parameter movements for convergence diagnostics. If ``None`` or ``0``, convergence will not be programmatically checked (reduces memory overhead, but convergence must then be visually diagnosed).",
-        default_value_cdrnn=100
+        "Number of timesteps over which to average parameter movements for convergence diagnostics. If ``None`` or ``0``, convergence will not be programmatically checked (reduces memory overhead, but convergence must then be visually diagnosed)."
     ),
     Kwarg(
         'convergence_stride',
@@ -597,7 +596,7 @@ MODEL_INITIALIZATION_KWARGS = [
     ),
     Kwarg(
         'ranef_dropout_rate',
-        None,
+        0.5,
         [float, None],
         "Rate at which to drop random effects indicators.",
         aliases=['ranef_dropout']

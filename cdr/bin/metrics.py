@@ -73,7 +73,7 @@ def results_to_csv(results, systems, baselines=None, indent=4, base_partitions=N
         base_partitions = ['train', 'dev', 'test']
     tasks = results.keys()
    
-    cols = ['model'] + ['%s.%s' % (t.replace(' ', '.'), p) for t in tasks for p in ('train', 'dev', 'test')]
+    cols = ['model'] + ['%s.%s' % (t.replace(' ', '.'), p) for t in tasks for p in base_partitions]
     out = []
 
     if baselines is None:
