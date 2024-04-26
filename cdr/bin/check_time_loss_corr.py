@@ -18,9 +18,9 @@ if __name__ == '__main__':
     config_paths = args.config_paths
     partition = args.partition
 
-    ll = pd.read_csv(StringIO(os.popen('python -m cdr.bin.metrics %s -c' % ' '.join(config_paths)).read()), na_rep='---')
+    ll = pd.read_csv(StringIO(os.popen('python -m cdr.bin.metrics %s -c' % ' '.join(config_paths)).read()), na_values=['---'])
     ll = ll.set_index('model')
-    n_iter = pd.read_csv(StringIO(os.popen('python -m cdr.bin.metrics %s -m iter -c' % ' '.join(config_paths)).read()), na_rep='---')
+    n_iter = pd.read_csv(StringIO(os.popen('python -m cdr.bin.metrics %s -m iter -c' % ' '.join(config_paths)).read()), na_values=['---'])
     n_iter = n_iter.set_index('model')
 
     datasets = [x for x in ll if x.endswith(partition)]
