@@ -371,7 +371,7 @@ MODEL_INITIALIZATION_KWARGS = [
         0,
         int,
         "Minimum number of training iterations.",
-        aliases=['niter_min']
+        aliases=['niter_min', 'min_n_iter', 'min_niter']
     ),
     Kwarg(
         'minibatch_size',
