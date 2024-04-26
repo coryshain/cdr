@@ -363,8 +363,15 @@ MODEL_INITIALIZATION_KWARGS = [
         'n_iter',
         100000,
         int,
-        "Number of training iterations. If using variational inference, this becomes the `expected` number of training iterations and is used only for Tensorboard logging, with no impact on training behavior.",
+        "Maximum number of training iterations. If no convergence checking is used, training will run to the maximum.",
         aliases=['niter']
+    ),
+    Kwarg(
+        'n_iter_min',
+        0,
+        int,
+        "Minimum number of training iterations.",
+        aliases=['niter_min']
     ),
     Kwarg(
         'minibatch_size',

@@ -6195,7 +6195,6 @@ class CDRModel(object):
                     converged = cur_step > self.convergence_n_iterates and \
                                 (min_p > self.convergence_alpha) and \
                                 (proportion_converged > self.convergence_alpha)
-                                # (p_ta_at_min_p > self.convergence_alpha)
 
                     if verbose:
                         stderr('rho_t: %s.\n' % rt_at_min_p)
@@ -6938,7 +6937,8 @@ class CDRModel(object):
         with self.session.as_default():
             with self.session.graph.as_default():
                 if self.check_convergence:
-                    return self.session.run(self.converged)
+                    return (self.session.run(self.converged) and
+                            self.global_step.eval(session=self.session) >= self.n_iter_min)
                 else:
                     return False
 
