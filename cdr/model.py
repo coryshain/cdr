@@ -92,6 +92,7 @@ if int(tf.__version__.split('.')[0]) == 1:
     from tensorflow.contrib.opt import NadamOptimizer
     from tensorflow.contrib.framework import argsort as tf_argsort
     from tensorflow.contrib import keras
+    keras_v1 = keras
     from tensorflow import check_numerics as tf_check_numerics
     parameter_properties = None
 
@@ -142,7 +143,15 @@ elif int(tf.__version__.split('.')[0]) == 2:
 
     from tensorflow_probability import math as tfm
     tf_erfcx = tfm.erfcx
-    from tensorflow.compat.v1.keras.optimizers import Nadam as NadamOptimizer
+    try:
+        from tensorflow.compat.v1 import keras as keras_v1
+#        from tensorflow.compat.v1.keras.optimizers import Nadam as NadamOptimizer
+        NadamOptimizer = keras_v1.optimizers.Nadam
+        set_session = keras_v1.backend.set_session
+    except (AttributeError, ModuleNotFoundError):
+        from tf_keras.api._v1 import keras as keras_v1
+        NadamOptimizer = keras_v1.optimizers.Nadam
+        set_session = keras_v1.backend.set_session
     from tensorflow import argsort as tf_argsort
     from tensorflow import keras
     from tensorflow.debugging import check_numerics as tf_check_numerics
@@ -968,7 +977,7 @@ class CDRModel(object):
                 self.pip_version = None
 
         self._initialize_session()
-        tf.keras.backend.set_session(self.session)
+        set_session(self.session)
 
         if build:
             self._initialize_metadata()
@@ -7853,7 +7862,7 @@ class CDRModel(object):
                         if self.optim_name is not None and self.lr_decay_family is not None:
                             stderr('Learning rate: %s\n' % self.lr.eval(session=self.session))
 
-                        pb = keras.utils.Progbar(n_minibatch)
+                        pb = keras_v1.utils.Progbar(n_minibatch)
 
                         loss_total = 0.
                         reg_loss_total = 0.
@@ -8167,7 +8176,7 @@ class CDRModel(object):
                     n_samples = self.n_samples_eval
 
                 if verbose:
-                    pb = keras.utils.Progbar(n_samples)
+                    pb = keras_v1.utils.Progbar(n_samples)
 
                 out = {}
                 if return_preds:
@@ -8243,7 +8252,7 @@ class CDRModel(object):
                 n_samples = self.n_samples_eval
 
             if verbose:
-                pb = keras.utils.Progbar(n_samples)
+                pb = keras_v1.utils.Progbar(n_samples)
 
             loss = np.zeros((len(feed_dict[self.Y_time]), n_samples))
 
@@ -8305,7 +8314,7 @@ class CDRModel(object):
             if n_samples is None:
                 n_samples = self.n_samples_eval
             if verbose:
-                pb = keras.utils.Progbar(n_samples)
+                pb = keras_v1.utils.Progbar(n_samples)
 
             for i in range(0, n_samples):
                 self.resample_model()
