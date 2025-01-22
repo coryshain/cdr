@@ -14,3 +14,4 @@ dependencies:
     - scipy>=0.14
     - tensorflow>=1.9
     - tensorflow-probability
+    - tf_keras
